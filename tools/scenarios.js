@@ -211,25 +211,29 @@
     return hit;
   }
   // Did the pulse ring actually land on *this cell's* box? `board.draw` strokes it on the cell rect
-  // inset by 2 px (js/render/board.js:179-184, `roundRect(r.x + 2, r.y + 2, cell - 4, cell - 4)` with
-  // lineWidth `max(2.5, cell * 0.09)`), so the stroke's centre line is a known distance from the
-  // centre. Sampling exactly that line separates "a red box was painted on this cell" from "some red
-  // pixels happen to sit in this cell's square" — a star glyph reaches only 0.31 cell from the centre
-  // (`Cell.starScale / 2`), so it can never fake a hit here.
-  const PULSE_SAMPLE_DIRS = [
-    [1, 0], [-1, 0], [0, 1], [0, -1],
-    [0.92, 0.39], [0.92, -0.39], [-0.92, 0.39], [-0.92, -0.39],
-    [0.39, 0.92], [0.39, -0.92], [-0.39, 0.92], [-0.39, -0.92],
-  ];
+  // inset by 2 px (js/render/board.js:179-184, `roundRect(r.x + 2, r.y + 2, cell - 4, cell - 4, 6)`,
+  // lineWidth `max(2.5, cell * 0.09)`), so the stroke's centre line is exactly `cell / 2 - 2` from the
+  // cell centre on four straight edges. A rectangle is not a circle: sampling at a fixed *radius* along
+  // a diagonal leaves the box, and a sub-pixel of slop at this line is the outer antialiased sliver of
+  // a ~4.7 px stroke — so the samples below sit on the centre line itself and slide only *along* the
+  // edge, staying inside the middle ±60% where the rounded corners cannot eat a hit. That separates
+  // "a red box was painted on this cell" from "some red pixels happen to sit in this cell's square":
+  // a star glyph reaches only 0.31 cell from the centre (`Cell.starScale / 2`), so it cannot fake one.
+  const RING_EDGES = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  const RING_FRACTIONS = [-0.6, -0.3, 0, 0.3, 0.6];
+  const RING_SAMPLES = RING_EDGES.length * RING_FRACTIONS.length;
   function ringOnCellRect(t, color, tol = 24) {
     const g = geo().geo;
-    const rad = g.cell / 2 - 2;
+    const inset = g.cell / 2 - 2;
+    const want = hex(color);
     const cx = (t % g.size) * g.cell + g.x + g.cell / 2;
     const cy = (((t / g.size) | 0) * g.cell) + g.y + g.cell / 2;
-    const want = hex(color);
     let hit = 0;
-    for (const [ux, uy] of PULSE_SAMPLE_DIRS) {
-      if (near(pixel(cx + ux * rad, cy + uy * rad), want, tol)) hit++;
+    for (const [nx, ny] of RING_EDGES) {
+      for (const f of RING_FRACTIONS) {
+        const d = f * inset;
+        if (near(pixel(cx + nx * inset + ny * d, cy + ny * inset + nx * d), want, tol)) hit++;
+      }
     }
     return hit;
   }
@@ -944,6 +948,14 @@
   // Game 类量出来的，不是照着浏览器输出回填的。遮罩、纪录与红框则全部读 DOM 和画布像素。
   const win = async () => {
     const c = GEN_CASES[0];
+    // 本场景要看档上的纪录，所以它得先自己清一次盘：默认清单里 `play` 先赢过一局（0 提示、18 步），
+    // 而 `recordBest` 优先「求助更少」，那条纪录会压住后面每一次收官 —— 不清盘的话下面几条断言测的
+    // 是「上一个场景留下了什么」，不是「这一局的收官有没有记账」。
+    $('#btn-reset').click();
+    await wait(24);
+    eq('清档之后初学档没有纪录', E().Store.best(c.tier), null);
+    eq('清档之后通关总数是零', [E().Store.totals().solved, E().Store.totals().hints, E().Store.totals().ms].join(','), '0,0,0');
+    eq('清档之后纪录表五档都空着', [...document.querySelectorAll('#record-list li i')].map((e) => e.textContent).join(','), '还没有纪录,还没有纪录,还没有纪录,还没有纪录,还没有纪录');
     const g = await open(c.tier, c.seed);
     const board = g.board;
     const HINTS_TO_WIN = 62;
@@ -1074,7 +1086,7 @@
       eq(`${k.tag}：提示闭嘴、一次也不扣、一格也不许多写`, `${s.hints},${s.cursor},${s.status}`, '0,0,playing');
       eq(`${k.tag}：面板说「提示没有扣次数」`, text('#hint-rule'), '提示没有扣次数');
       eq(`${k.tag}：面板让人先看红框那一格`, text('#hint-line'), '你的记号和线索推出来的结论冲突了：先看红框那一格。');
-      eq(`${k.tag}：红框就画在这一格的 cellRect 上（12 个采样点全中）`, ringOnCellRect(cl.cell, TH().error), 12);
+      eq(`${k.tag}：红框就画在这一格的 cellRect 上（${RING_SAMPLES} 个采样点全中）`, ringOnCellRect(cl.cell, TH().error), RING_SAMPLES);
       eq(`${k.tag}：对照格（记号 ${CONTROL}）画不出这个红框`, ringOnCellRect(CONTROL, TH().error), 0);
       pointed.push(cl.cell);
     }
