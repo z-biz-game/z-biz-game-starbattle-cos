@@ -13,8 +13,7 @@
 // Difficulty therefore has exactly two axes, and both are honest ones: how big the board is, and
 // how the regions bite (`polish` below moves the boundary one cell at a time and re-runs the pencil
 // path after every step). There are no numbers on this board to thin out — the partition *is* the
-// clue set — so the pruning knob that the other games in this family reach for does not exist
-// here. See DESIGN §5.
+// clue set — so the pruning knob that the other games in this family reach for does not exist here.
 
 import { makeRng } from './rng.js';
 import { createBoard, EMPTY } from './board.js';
@@ -28,8 +27,10 @@ export const inBand = (score, band) => !!band && score >= band[0] && score <= ba
 // `remaining` is what makes the whole generator work: it says how many cells the pencil path left
 // undecided, so a partition that cannot be finished still has a *distance* to its nearest
 // finishable neighbour. Without it the hill climb would have nothing to descend when it starts
-// from a board that is not pencil-completable — which is the normal case at 9×9 (3 of 20 random
-// carves finish) and the impossible case at 10×10 (0 of 20, median 93 cells left open).
+// from a board that is not pencil-completable — which is the rare case at 9×9 (20 random cuts, 19
+// of them carved, 2 of those finish) and the unreached one at 10×10 (0 of 16 carved cuts, median
+// 92 of 100 cells left undecided). Those two lines are not folklore: `node tools/balance.mjs`
+// reruns that experiment and prints today's numbers every time the gate runs.
 //
 // `createBoard` throws on a partition that split a region, which is why the walk never has to
 // trust its own connectivity reasoning; a conflict from `solve` is counted as infinitely far,
@@ -197,9 +198,10 @@ const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 // has no legal placement at all below 8×8 — the region constraint is not even in the argument:
 // enumerating placements alone gives 0 for N = 4,5,6,7 and then 2 / 664 / 146510 for N = 8 / 9 / 10.
 // tools/engine-test.mjs recomputes that table by two methods that share no code with the solver or
-// the counter, and goes red if the zero ever stops being zero. So the tiers the brief sketches at
-// 5×5 and 6×6 have no legal board to sit in, and the ladder starts at 8×8 — stated in README, not
-// hidden.
+// the counter, and goes red if the zero ever stops being zero; tools/balance.mjs recomputes it a
+// third time and prints the whole table on every run. So the tiers the brief sketches at 5×5 and
+// 6×6 have no legal board to sit in, and the ladder starts at 8×8 — a measured statement, not a
+// caption.
 export const MIN_SIZE = 8;
 
 // Five tiers. Every `band` below is a *measured* interval: score is Σ(rule applications × weight)
@@ -209,9 +211,11 @@ export const MIN_SIZE = 8;
 //
 // Two things the brief asked for are *not* in this table, and both are facts rather than choices:
 // 5×5 and 6×6 have no legal board at all (see MIN_SIZE above), and 10×10 — the tournament size —
-// is not shippable with the promised rule family: a random 10×10 cut leaves a median of 93 of the
-// 100 cells undecided, and 0 of 20 carves plus 0 of 6 local-search runs reached a pencil-completable
-// partition. Measured, reported in README and DESIGN §9, and the ladder stops at 9×9.
+// is not shippable with the promised rule family. Today's measurement, printed by
+// `node tools/balance.mjs` on every run rather than asserted here: of 20 random cuts at 10×10, 16
+// produced a connected partition, 0 of those 16 were pencil-completable and 0 of 6 local-search
+// runs got one there, with a median of 92 of the 100 cells left undecided. The 9×9 control in the
+// same run is 2 of 19. The ladder stops at 9×9.
 export const TIERS = [
   { key: 'trainee', name: '初学', size: 8, band: [110, 170], tightenMoves: 24 },
   { key: 'apprentice', name: '上手', size: 8, band: [200, 250], tightenMoves: 24 },
