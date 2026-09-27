@@ -45,3 +45,43 @@ jobs:
 
       - name: Entry files exist
         run: test -f index.html && grep -q '<canvas' index.html && grep -q 'js/main.js' index.html
+
+  # Everything above is Node-side. tools/verify.sh is the browser gate — 798 assertions on this
+  # repo's measured run (boot 43 · gen 201 · play 128 · hint 295 · win 131) — and CI had never
+  # invoked it once. Unlike some siblings this verify.sh runs ONE shape per invocation, so the job
+  # calls it twice; a step that silently skipped a shape would halve the coverage in silence.
+  browser:
+    name: real browser gate (both URL shapes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        # 22, not 20: the CDP driver uses the global WebSocket/fetch that only exist from Node 22.
+        with:
+          node-version: 22
+
+      - name: Browser gate, root shape
+        env:
+          WD_TIMEOUT: 900
+        run: bash tools/verify.sh
+
+      # Pages serves us under /z-biz-game-starbattle-cos/. A server whose document root IS the repo
+      # cannot distinguish a leading-slash import from a relative one, and a dynamic import that
+      # throws takes the rest of the injected script down with it — so "fewer green lines" is what a
+      # deployed 404 looks like from the harness's side. This shape is the gate, not a footnote.
+      - name: Browser gate, prefix shape (how Pages serves us)
+        env:
+          WD_TIMEOUT: 900
+        run: |
+          root=$(mktemp -d)
+          ln -s "$GITHUB_WORKSPACE" "$root/z-biz-game-starbattle-cos"
+          python3 -m http.server 5513 --bind 127.0.0.1 --directory "$root" &
+          SERVER=$!
+          trap 'kill $SERVER 2>/dev/null' EXIT
+          for i in $(seq 1 40); do
+            curl -fsS -m 2 "http://127.0.0.1:5513/z-biz-game-starbattle-cos/" >/dev/null 2>&1 && break
+            sleep 0.25
+          done
+          curl -fsS -m 3 "http://127.0.0.1:5513/z-biz-game-starbattle-cos/js/main.js" >/dev/null
+          curl -fsS -m 3 "http://127.0.0.1:5513/z-biz-game-starbattle-cos/js/engine/count.js" >/dev/null
+          BASE_URL=http://127.0.0.1:5513/z-biz-game-starbattle-cos/ CDP_PORT=9413 bash tools/verify.sh
