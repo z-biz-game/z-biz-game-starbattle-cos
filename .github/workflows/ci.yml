@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: syntax + engine guarantees
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # No npm install: the game has zero runtime dependencies, and pulling Electron into
+      # CI to prove nothing is how a repo starts failing on a network flake.
+      - name: Syntax check every source
+        run: |
+          for f in $(git ls-files 'js/*.js' 'js/*/*.js'); do node --check "$f" || exit 1; done
+          node --check server.cjs
+          node --check electron/main.cjs
+          node --check electron/preload.cjs
+          for f in $(git ls-files 'tools/*.mjs' tools/scenarios.js); do node --check "$f" || exit 1; done
+
+      # The real gate: every shipped board must have one solution and be reachable by pencil
+      # logic, and the two engines that judge that must agree cell by cell.
+      - name: Engine tests
+        run: node tools/engine-test.mjs
+
+      # The ladder is a promise, not a caption: `TIERS[].band` is a selection target, and this
+      # step goes red if a tier stops landing in its own band or the medians stop ordering.
+      - name: Difficulty ladder is still measured
+        run: node tools/balance.mjs
+        env:
+          SAMPLES: "24"
+
+      - name: Baked levels still match the generator
+        run: node tools/bake.mjs --check
+
+      - name: Entry files exist
+        run: test -f index.html && grep -q '<canvas' index.html && grep -q 'js/main.js' index.html
