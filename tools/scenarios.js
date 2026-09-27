@@ -298,5 +298,182 @@
     return report({ version: A().version, tiers: E().TIERS.length, ids: want.length, rules: li.length });
   };
 
-  w.__sc = { boot };
+  // ==================================================================== 2. gen
+  //
+  // 现场生成 = 这一轮唯一能断言"出货盘被证过"的地方：本仓没有 baked library（js/data 是空的，
+  // CI 也没有 bake 步骤），所以 tapa 那条"题单每局都被穷举证过唯一解"在这里不成立；成立的是
+  // "begin() 现画的这一盘，独立穷举器数到唯一、铅笔路径推得完、两个引擎逐格相同"。
+  //
+  // The five seeds below are pinned to their whole board (region string + solution string + the
+  // exhaustive counter's node count), computed once on the node side with the same
+  // js/engine/generate.js the page imports. That is the cross-engine determinism pin: rng.js is
+  // xorshift32 over hash32 (integer ops only, no Math.random, no Date) and regions.js/generate.js
+  // shuffle with Fisher-Yates on that stream, so a seed must draw the identical board in Chrome and
+  // in node. A sort comparator that pulled randomness, or a Date.now() leaking into a selection key,
+  // would go red here rather than ship two different games on the two engines.
+  const GEN_CASES = [
+    { tier: 'trainee', name: '初学', seed: 'trainee-gate', size: 8, score: 110, steps: 64, nodes: 123,
+      region: '0000446600444466044516660555111125511711225517712223173322233333',
+      stars: '0000101010100000000010101010000000000101010100000000010101010000' },
+    { tier: 'apprentice', name: '上手', seed: 'apprentice-gate', size: 8, score: 226, steps: 64, nodes: 95,
+      region: '0000011100031111222331116223775562237555666375553663554433334444',
+      stars: '0101000000000101010100000000010110100000000010101010000000001010' },
+    { tier: 'regular', name: '熟练', seed: 'regular-gate', size: 8, score: 291, steps: 64, nodes: 80,
+      region: '3111104433111004331600043766666477222664777225647772255577225555',
+      stars: '0000101010100000000010101010000000000101010100000000010101010000' },
+    { tier: 'expert', name: '高阶', seed: 'expert-gate', size: 9, score: 325, steps: 81, nodes: 1314,
+      region: '666660011666500011555553001255333011222233331772233311722444441777444888774444448',
+      stars: '001000010100001000000100010010001000000100001100000100001010000000000101010010000' },
+    { tier: 'master', name: '大师', seed: 'master-gate', size: 9, score: 362, steps: 81, nodes: 832,
+      region: '611115222688155522668155522688115722118147777111144777133344700133330000113300000',
+      stars: '000101000100000010001001000100000010001010000000000101010010000000000101010100000' },
+  ];
+
+  // The shipped star pattern of trainee-gate, as a 0/1 array — reused as a *witness* below: it is a
+  // legal two-stars-per-row/column/region placement for the trainee partition, and because the
+  // row-band partition's region constraint is the row constraint repeated, the same pattern is also
+  // legal there. That is what makes the many-solutions control sample a real "多解" and not a
+  // mislabelled "无解".
+  const bitsOf = (s) => s.split('').map((c) => Number(c));
+
+  // Hand-written tally, a third pair of eyes: two stars in every row, column and region, and no two
+  // of them touching (eight directions). Deliberately not `legalStarSet` — the point is that a bug
+  // shared between the two shipped implementations cannot also be a bug here.
+  function tally(board, stars) {
+    const bad = [];
+    for (const u of board.units) {
+      const k = u.cells.filter((t) => stars[t] === 1).length;
+      if (k !== 2) bad.push(`${u.name} 里有 ${k} 颗`);
+    }
+    for (let t = 0; t < board.n; t++) {
+      if (stars[t] !== 1) continue;
+      for (const nb of board.neighbors[t]) if (nb > t && stars[nb] === 1) bad.push(`${board.cellName(t)}↔${board.cellName(nb)} 挨着`);
+    }
+    return bad;
+  }
+
+  const gen = async () => {
+    const seen = [];
+    for (const c of GEN_CASES) {
+      const tag = `${c.name}/${c.tier}`;
+      const g = await open(c.tier, c.seed);
+      const b = g.board;
+      const p = g.puzzle;
+      const tier = E().tierFor(c.tier);
+
+      eq(`${tag}：这一屏就是 ${c.seed} 现生成的盘`, `${p.originSeed},${p.seed},${p.tier}`, `${c.seed},${c.seed}#0,${c.tier}`);
+      eq(`${tag}：尺寸写在 puzzle 与 board 两处`, `${p.size},${b.size},${g.w}`, `${c.size},${c.size},${c.size}`);
+      eq(`${tag}：Chrome 画的划分与 node 侧同 seed 逐格相同`, Array.from(b.region).join(''), c.region);
+      eq(`${tag}：Chrome 盘上的唯一解与 node 侧逐格相同`, Array.from(p.solution).join(''), c.stars);
+      eq(`${tag}：划分里有 ${c.size} 个区域、每格有归属`, [new Set(Array.from(b.region)).size, b.region.length].join(','), `${c.size},${c.size * c.size}`);
+
+      // —— 铅笔推得完：出题的验收条件，在页内重跑一遍
+      const re = E().solve(b);
+      eq(`${tag}：铅笔路径推得完（verify 报 0 条不满）`, re.ok, true);
+      eq(`${tag}：重跑的分数与生成时同一个数`, re.score, c.score);
+      eq(`${tag}：重跑的步数与生成时同一个数`, re.steps, c.steps);
+      eq(`${tag}：${c.steps} 笔正好写了 ${c.size * c.size} 格各一次`, `${re.rows.length},${new Set(re.rows.map((r) => r.cell)).size}`, `${c.size * c.size},${c.size * c.size}`);
+      eq(`${tag}：难度分落在这一档量出来的区间 ${tier.band.join('–')} 里`, re.score >= tier.band[0] && re.score <= tier.band[1], true);
+      const wrongWay = re.rows.filter((r) => (r.value === E().STAR ? bitsOf(c.stars)[r.cell] !== 1 : bitsOf(c.stars)[r.cell] === 1));
+      eq(`${tag}：没有一笔推导写在唯一解的反面`, wrongWay.map((r) => `${r.rule.key}@${b.cellName(r.cell)}`).join(' | '), '');
+      const usedRules = Object.keys(re.breakdown).sort();
+      ck(`${tag}：铅笔路径真的用到了多条规则（${usedRules.length} 条）`, usedRules.length >= 3, usedRules.join(','));
+      eq(`${tag}：用的规则都在这六条里`, usedRules.filter((k) => !E().RULE_LIST.some((r) => r.name === k)).join(','), '');
+
+      // —— 独立穷举复核：走穷，不是烧预算
+      const cnt = E().countSolutions({ size: b.size, region: b.region }, { cap: 2, budget: 400000 });
+      eq(`${tag}：count.js 独立数到唯一解`, cnt.status, E().UNIQUE);
+      eq(`${tag}：判决是「恰好一个」而不是「至少一个」`, cnt.solutions, 1);
+      eq(`${tag}：穷举节点数与 node 侧同 seed 一致`, cnt.nodes, c.nodes);
+      ck(`${tag}：唯一解是走完搜索得出的（${cnt.nodes} < 预算 400000）`, cnt.nodes < 400000, `nodes=${cnt.nodes}`);
+      eq(`${tag}：穷举器给的解与铅笔的解逐格相同`, Array.from(cnt.first).join(''), c.stars);
+      eq(`${tag}：生成器种下的星集就是那个唯一解`, Array.from(p.stars, (v) => (v ? 1 : 0)).join(''), c.stars);
+      eq(`${tag}：第三双眼睛 legalStarSet 认这个解`, E().legalStarSet({ size: b.size, region: b.region }, cnt.first), true);
+      eq(`${tag}：场景自己数一遍——每行/列/区两颗、星不相邻`, tally(b, Array.from(cnt.first)).join(' | '), '');
+      eq(`${tag}：星数正好 2N=${2 * c.size}`, Array.from(cnt.first).reduce((a, x) => a + x, 0), 2 * c.size);
+
+      // —— 玩家看得见的那一屏确实是这盘
+      eq(`${tag}：面板写着尺寸`, text('#stat-tier'), `${c.size}×${c.size}`);
+      eq(`${tag}：面板写着档名`, text('#stat-name'), c.name);
+      eq(`${tag}：面板写着实测难度`, text('#stat-score'), String(c.score));
+      eq(`${tag}：目标是 2N 颗星、开局一颗没有`, text('#stat-stars'), `0/${2 * c.size}`);
+      eq(`${tag}：单元是 3N 个、开局没凑满`, text('#stat-units'), `0/${3 * c.size}`);
+      eq(`${tag}：未定格就是整盘`, text('#stat-remaining'), String(c.size * c.size));
+      eq(`${tag}：开局没有冲突`, text('#stat-conflicts'), '0');
+      eq(`${tag}：提示计数归零`, text('#stat-hints'), '0');
+      eq(`${tag}：切到棋局屏了`, A().view(), 'game');
+      eq(`${tag}：画布几何与盘面同尺寸`, geo().geo.size, c.size);
+      eq(`${tag}：胜负遮罩没有挡着棋盘`, hitAt('#win-veil'), 'no-box');
+      const line = text('#state-line');
+      ck(`${tag}：状态行说清了这盘是怎么量的`, line.indexOf(String(c.steps)) >= 0 && line.indexOf(String(c.score)) >= 0, line);
+
+      seen.push({ tier: c.tier, score: c.score, steps: c.steps, nodes: cnt.nodes, over: cnt.status === E().OVERBUDGET });
+    }
+
+    // —— 阶梯：五档现场出货的分数真的在上升（tools/balance.mjs 用 24 样本的中位数说同一句话，
+    //    这里是浏览器这一侧、五个固定 seed 的现场读数）
+    eq('五档现场出货的难度分严格上升', seen.map((x) => x.score).join('<'), '110<226<291<325<362');
+    eq('五档现场出货的步数（8×8 是 64、9×9 是 81）', seen.map((x) => x.steps).join(','), '64,64,64,81,81');
+    eq('出货盘里没有一盘超预算（0/5）', seen.filter((x) => x.over).length, 0);
+    eq('举证最贵的一盘用了 1314 / 400000 个节点', Math.max(...seen.map((x) => x.nodes)), 1314);
+
+    // ==================================================================== 反空样本对照组
+    // A counter that always answered "UNIQUE" would pass every assertion above. These three arms
+    // have to be judged *not* unique, by the same calls, on the same page:
+    //   行带 / 列带  —— 有解（上面那个 witness 就是其一），所以是 MANY，且铅笔一格都推不出
+    //   单格区域    —— 那一区放不下两颗互不相邻的星，所以是 NONE
+    //   预算 1      —— 只许报告「超预算」，不许把没数完的盘当成唯一解硬答（tools/balance.mjs 把
+    //                  M>0 叫作承诺破口，这一条就是钉住它的浏览器侧版本）
+    const SIZE = 8;
+    const rowBands = Array.from({ length: 64 }, (_, t) => (t / SIZE) | 0);
+    const colBands = Array.from({ length: 64 }, (_, t) => t % SIZE);
+    const oneCell = Array.from({ length: 64 }, (_, t) => (t === 0 ? 0 : ((t / SIZE) | 0) === 0 ? 1 : (t / SIZE) | 0));
+    const witness = bitsOf(GEN_CASES[0].stars);
+    const bandCases = [
+      { name: '行带（区=行）', region: rowBands, want: E().MANY },
+      { name: '列带（区=列）', region: colBands, want: E().MANY },
+      { name: '有一个单格区域', region: oneCell, want: E().NONE },
+    ];
+    for (const k of bandCases) {
+      const cbb = E().createBoard({ size: SIZE, region: k.region });
+      const cn = E().countSolutions({ size: SIZE, region: cbb.region }, { cap: 2, budget: 400000 });
+      eq(`对照样本「${k.name}」：穷举器给的不是唯一解`, cn.status !== E().UNIQUE, true);
+      eq(`对照样本「${k.name}」：判决是 ${k.want}`, cn.status, k.want);
+      const sv = E().solve(cbb);
+      eq(`对照样本「${k.name}」：铅笔推不完这一盘`, sv.ok, false);
+      const nf = E().nextForced(cbb, new Int8Array(64));
+      eq(`对照样本「${k.name}」：forced 在空盘上一格都不认`, nf === null ? 'null' : nf.conflict ? 'conflict' : 'cell', k.want === E().MANY ? 'null' : 'conflict');
+      eq(`对照样本「${k.name}」：推导脚本一笔都没有`, sv.rows.length, 0);
+      if (k.want === E().MANY) {
+        const tiny = E().countSolutions({ size: SIZE, region: cbb.region }, { cap: 2, budget: 1 });
+        eq(`对照样本「${k.name}」：预算烧光时报告超预算而不是硬答`, tiny.status, E().OVERBUDGET);
+        eq(`对照样本「${k.name}」：超预算时不交半截答案`, tiny.first, null);
+      }
+    }
+    // The two MANY arms must not be "no solution" wearing a different label: the witness pattern is
+    // legal on both, which is what makes 多解 a real verdict.
+    eq('行带盘上那个 witness 星集合法（所以确实是多解而不是无解）', E().legalStarSet({ size: SIZE, region: rowBands }, witness), true);
+    eq('列带盘上同一个 witness 星集也合法', E().legalStarSet({ size: SIZE, region: colBands }, witness), true);
+    eq('单格区域盘上同一个 witness 被拒（那一区只有 1 格）', E().legalStarSet({ size: SIZE, region: oneCell }, witness), false);
+    eq('场景自己数：witness 在行带盘上每行/列/区都正好两颗、互不相邻', tally(E().createBoard({ size: SIZE, region: rowBands }), witness).join(' | '), '');
+    eq('场景自己数：单格区域盘上那一区数不出两颗星', tally(E().createBoard({ size: SIZE, region: oneCell }), witness).filter((s) => s.indexOf('第1区') >= 0).join(' | '), '第1区 里有 0 颗');
+    // A partition that splits a region is refused where it is built, not silently played.
+    const split = rowBands.map((g) => g);
+    split[0] = 0;
+    split[63] = 0;
+    split[1] = 1;
+    split[62] = 1;
+    let splitMsg = 'no-throw';
+    try {
+      E().createBoard({ size: SIZE, region: split });
+    } catch (e) {
+      splitMsg = e.message;
+    }
+    ck('区域被切成两半时 createBoard 直接拒绝', splitMsg.indexOf('不连通') >= 0, splitMsg);
+    eq('生成器给的划分里没有断开的区域（五盘都建得起 board）', seen.length, 5);
+    eq('这一段没有报错', errors.join(' | '), '');
+    return report({ boards: seen.length, tiers: seen.map((x) => `${x.tier}:${x.score}/${x.steps}步/${x.nodes}节点`).join(' ') });
+  };
+
+  w.__sc = { boot, gen };
 })(window);
