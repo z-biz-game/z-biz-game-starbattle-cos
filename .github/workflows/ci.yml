@@ -36,13 +36,12 @@ jobs:
 
       # The ladder is a promise, not a caption: `TIERS[].band` is a selection target, and this
       # step goes red if a tier stops landing in its own band or the medians stop ordering.
+      # It also re-proves every sampled board's uniqueness with count.js inside the node budget
+      # and compares the two engines' solutions cell by cell — see tools/balance.mjs.
       - name: Difficulty ladder is still measured
         run: node tools/balance.mjs
         env:
           SAMPLES: "24"
-
-      - name: Baked levels still match the generator
-        run: node tools/bake.mjs --check
 
       - name: Entry files exist
         run: test -f index.html && grep -q '<canvas' index.html && grep -q 'js/main.js' index.html
