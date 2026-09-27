@@ -123,7 +123,7 @@
     const ev = new PointerEvent(type, {
       bubbles: true,
       cancelable: true,
-      pointerId: 7,
+      pointerId: 1,
       isPrimary: true,
       clientX: x,
       clientY: y,
@@ -475,5 +475,194 @@
     return report({ boards: seen.length, tiers: seen.map((x) => `${x.tier}:${x.score}/${x.steps}步/${x.nodes}节点`).join(' ') });
   };
 
-  w.__sc = { boot, gen };
+  // ==================================================================== 3. play
+  // The commit path a finger takes: one gesture = one snapshot = one undo, and every number the
+  // panel shows is the number `state()` holds. The board used is trainee-gate, whose 16 solution
+  // cells are pinned in GEN_CASES, so "place the answer" is a hand-written list rather than a
+  // whatever-the-engine-says loop — and a wrong-star detour stays red for the right reason.
+  const FIELDS = ['moves', 'hints', 'hintCount', 'stars', 'marked', 'remaining', 'units', 'conflicts', 'score', 'undoDisabled'];
+  const domOf = () => ({
+    moves: text('#stat-moves'),
+    hints: text('#stat-hints'),
+    hintCount: text('#hint-count'),
+    stars: text('#stat-stars'),
+    marked: text('#stat-marked'),
+    remaining: text('#stat-remaining'),
+    units: text('#stat-units'),
+    conflicts: text('#stat-conflicts'),
+    score: text('#stat-score'),
+    undoDisabled: String($('#btn-undo').disabled),
+  });
+  const mirror = (s) => ({
+    moves: String(s.moves),
+    hints: String(s.hints),
+    hintCount: String(s.hints),
+    stars: `${s.stars}/${s.target}`,
+    marked: String(s.marked),
+    remaining: String(s.remaining),
+    units: `${s.satisfied}/${s.units}`,
+    conflicts: String(s.conflicts),
+    score: s.score == null ? '—' : String(s.score),
+    undoDisabled: String(s.steps === 0),
+  });
+  // Panel readouts vs the state machine, one assertion per field so a drift names the field.
+  function readouts(tag) {
+    const s = A().state();
+    const d = domOf();
+    const m = mirror(s);
+    for (const f of FIELDS) eq(`${tag}：#panel 的 ${f} 就是 state() 的读数`, d[f], m[f]);
+    return s;
+  }
+
+  const play = async () => {
+    const c = GEN_CASES[0];
+    const g = await open(c.tier, c.seed);
+    const b = g.board;
+    const stars = bitsOf(c.stars);
+    const starCells = [];
+    const otherCells = [];
+    for (let t = 0; t < stars.length; t++) (stars[t] ? starCells : otherCells).push(t);
+    eq('这一盘是 16 个星格对 48 个非星格', `${starCells.length},${otherCells.length}`, '16,48');
+    eq('开局一步没有', `${A().state().steps},${A().state().moves},${A().state().hints}`, '0,0,0');
+    readouts('开局');
+
+    // ---- 真实指针：按下去是预览，抬起来才是墨迹
+    const t0 = starCells[0];
+    const p0 = at(t0);
+    pointer('pointerdown', p0.x, p0.y);
+    await wait(24);
+    eq('抬指之前那一格仍然空着（预览不是墨迹）', A().valueOf(t0), E().EMPTY);
+    eq('抬指之前步数不动', A().state().moves, 0);
+    pointer('pointerup', p0.x, p0.y);
+    await wait(24);
+    eq('抬指之后那一格才落星', A().valueOf(t0), E().STAR);
+    eq('一次手势算一步', `${A().state().steps},${A().state().moves}`, '1,1');
+    eq('面板同步显示 1/16 颗星', text('#stat-stars'), '1/16');
+    ck('那一格确实画出了一颗星（琥珀色实心墨迹）', inkInCell(t0, TH().accent, 34) > 40, `ink=${inkInCell(t0, TH().accent, 34)}`);
+    ck('没放星的格子里没有这颗星的墨（对照）', inkInCell(otherCells[0], TH().accent, 34) === 0, `ink=${inkInCell(otherCells[0], TH().accent, 34)}`);
+
+    // 板外一指：hitCell 说不是格子，就不许多出第二步
+    const box = geo().canvas;
+    pointer('pointerdown', box.left + 3, box.top + 3);
+    pointer('pointerup', box.left + 3, box.top + 3);
+    await wait(24);
+    eq('画布内边距上的一指不产生任何一步', A().state().steps, 1);
+    eq('那一指也没有把第 1 行 1 列改动', A().valueOf(A().cellAt(0, 0)), E().EMPTY);
+    readouts('一指之后');
+
+    // 撤销走的是页面自己的按钮绑定
+    $('#btn-undo').click();
+    await wait(24);
+    eq('点「撤销」把那颗星抬走了', A().valueOf(t0), E().EMPTY);
+    eq('撤销之后步数归零', `${A().state().steps},${A().state().moves}`, '0,0');
+    eq('撤销之后撤销键重新变灰', $('#btn-undo').disabled, true);
+
+    // ---- 一笔拖过五格：五格墨迹、一步账
+    $('#btn-mode-mark').click();
+    await wait(20);
+    eq('切到标灰工具', A().state().mode, E().OUT);
+    eq('标灰键的按下态与模式同步', $('#btn-mode-mark').getAttribute('aria-pressed'), 'true');
+    eq('放星键弹起', $('#btn-mode-star').getAttribute('aria-pressed'), 'false');
+    const run = [0, 1, 2, 3, 4].map((x) => A().cellAt(x, 3));
+    await gestureDrag(run[0], run[4]);
+    eq('一笔拖过 5 格，5 格全成灰点', run.map((t) => A().valueOf(t)).join(','), '2,2,2,2,2');
+    eq('一整笔只算一步（撤销是一次手势而不是一个格）', `${A().state().steps},${A().state().moves}`, '1,1');
+    eq('灰点数就是 5', A().state().marked, 5);
+    readouts('一笔五格之后');
+    A().undo();
+    await wait(20);
+    eq('一次撤销把五格全部还原', run.map((t) => A().valueOf(t)).join(','), '0,0,0,0,0');
+    eq('还原之后灰点归零、星数归零', `${A().state().marked},${A().state().stars}`, '0,0');
+
+    // ---- 从自己的记号起笔就是擦（同一个手势家族的第二条规则）
+    A().stroke([run[0], run[1]], E().OUT);
+    eq('先把两格涂灰', [A().valueOf(run[0]), A().valueOf(run[1])].join(','), '2,2');
+    await gestureDrag(run[0], run[1]);
+    eq('从灰点起笔拖过去是擦掉，不是再涂一遍', [A().valueOf(run[0]), A().valueOf(run[1])].join(','), '0,0');
+    eq('擦也算一步', A().state().steps, 2);
+    A().undo();
+    eq('撤销擦的那一笔，两格又灰了回来', [A().valueOf(run[0]), A().valueOf(run[1])].join(','), '2,2');
+    A().undo();
+    eq('两笔撤销回到空屏（步数、灰点、动作数一起归零）', `${A().state().steps},${A().state().marked},${A().state().moves}`, '0,0,0');
+
+    // ---- 一键标灰：免费、不替玩家放星、整片一笔
+    $('#btn-mode-star').click();
+    A().tap(starCells[0]);
+    A().tap(starCells[1]);
+    const pre = A().state();
+    A().prune();
+    const post = A().state();
+    const pr = A().game.steps[A().game.steps.length - 1];
+    eq('落两颗星之后是一步两格', `${pre.moves},${pre.steps},${pre.stars}`, '2,2,2');
+    eq('一键标灰记在标灰账上', post.prunes, 1);
+    eq('一键标灰不动步数（它是免费的）', post.moves, pre.moves);
+    eq('一键标灰不动提示数', post.hints, pre.hints);
+    eq('这一笔写的每一格都是灰点', pr.writes.every((x) => x.to === E().OUT && x.from === E().EMPTY), true);
+    eq('它一颗星也没替我放', pr.writes.filter((x) => stars[x.cell] === 1).length, 0);
+    eq('它说写了多少格就是多少格，面板也这么写', `${pr.writes.length},${post.marked},${text('#stat-marked')}`, `${pr.writes.length},${pr.writes.length},${pr.writes.length}`);
+    ck('两颗星的八邻域至少该有 8 格被标灰', pr.writes.length >= 8, `writes=${pr.writes.length}`);
+    eq('提示框把这件事说成免费', text('#hint-rule'), '一键标灰（免费）');
+    ck('提示框写的格数与这一笔一致', text('#hint-line').indexOf(`${pr.writes.length} 个灰点`) >= 0, text('#hint-line'));
+    A().undo();
+    await wait(20);
+    eq('一整片灰点一次撤销就全回去', `${A().state().marked},${A().state().prunes}`, '0,0');
+    eq('免费的动作撤销时不动步数', A().state().moves, 2);
+
+    // ---- 满盘才判胜：先把 15 颗星放对
+    for (let k = 2; k < 15; k++) A().tap(starCells[k]);
+    const mid = readouts('十五颗星之后');
+    eq('差一颗星不判胜', `${mid.status},${mid.stars}/${mid.target}`, 'playing,15/16');
+    eq('十五颗星也没有冲突', `${mid.conflicts},${mid.adjacent}`, '0,0');
+    eq('差的那一格还是空的', A().valueOf(starCells[15]), E().EMPTY);
+    // 满盘墨迹 ≠ 下完。判胜看的是「每单元两颗、互不相邻」，不是还剩几个空格，所以这里分两步：
+    // 先把 48 个非星格中的 47 个涂灰（留第 64 格这一个活口），再把那一格也涂死 —— 整盘 64 格
+    // 全有墨、未定格 0，仍然不是胜。第二张对照的读数按 diagnose 的真实口径写：它只报「数得出来的
+    // 矛盾」（第 7 行了 1 颗星但还剩 1 格可放，所以并不算 violated），不许伪造冲突。
+    A().stroke(otherCells.slice(0, 47), E().OUT);
+    const inked = A().state();
+    eq('涂掉 47 个非星格之后还剩 2 格未定', `${inked.remaining},${inked.marked}`, '2,47');
+    eq('整盘只差一颗星、两格没定，仍然没胜', `${inked.status},${inked.stars}/${inked.target}`, 'playing,15/16');
+    eq('这一屏一个冲突也没有（不许把「没下完」报成「撞破规则」）', `${inked.conflicts},${inked.violated},${inked.adjacent}`, '0,0,0');
+    ck('状态行还在报「还差几颗」而不是胜利', text('#state-line').indexOf('还差 1 颗星') >= 0, text('#state-line'));
+    readouts('47 格涂灰之后');
+    A().stroke([otherCells[47]], E().OUT);
+    const dead = A().state();
+    eq('最后一格也涂死：48 格全成灰点，棋盘只剩一个活口', `${dead.remaining},${dead.marked},${dead.stars}`, '1,48,15');
+    eq('剩下的那一格就是缺的那颗星的位置', A().valueOf(starCells[15]), E().EMPTY);
+    eq('满盘只剩一个活口也不判胜（判胜看单元，不看还剩几格）', `${dead.status},${dead.stars}/${dead.target}`, 'playing,15/16');
+    eq('满盘错墨也不谎报矛盾（diagnose 只报它数得出来的）', `${dead.violated},${dead.conflicts},${dead.adjacent}`, '0,0,0');
+    // 差的这一颗是格 59 = 第 8 行第 4 列：第 8 行（只有 57）、第 4 列（只有 43）、第 4 区（只有
+    // 55）各只剩它一格可放，所以凑满的单元是 24 − 3 = 21。这三处是照 GEN_CASES[0] 那份解手数的。
+    eq('凑满的单元数：三处各差一颗，21/24', `${dead.satisfied}/${dead.units}`, '21/24');
+    eq('终局遮罩在没有胜的时候藏得干净', hitAt('#win-veil'), 'no-box');
+
+    // ---- 第 16 颗落下
+    A().tap(starCells[15]);
+    const won = readouts('终局');
+    eq('第 16 颗落下就是胜', `${won.status},${won.stars}/${won.target},${won.conflicts}`, 'won,16/16,0');
+    eq('终局把 3N 个单元全数凑满', `${won.satisfied}/${won.units}`, '24/24');
+    ck('胜利遮罩出来且命中盒在控件上', hitAt('#win-veil') === 'hit' && shown('#win-veil'), hitAt('#win-veil'));
+    eq('状态行换成结论', `${text('#state-line')}|${$('#state-line').dataset.kind}`, '每一行、每一列、每一区都正好两颗，谁也不挨着。|good');
+    const meta = text('#win-meta').split(' · ');
+    eq('胜利卡：档名与尺寸', meta[0], '初学 8×8');
+    ck('胜利卡：计时写成 mm:ss（值是墙钟，只钉形状）', /^\d{2}:\d{2}$/.test(meta[1]), meta[1]);
+    eq('胜利卡：步数就是这一局的动作数', meta[2], '步数 18');
+    eq('胜利卡：一次提示也没用', meta[3], '提示 0');
+    eq('胜利卡：撤销掉的一键标灰不再记账', meta[4], '一键标灰 0 次');
+    eq('胜利卡：复读这一盘的实测难度', meta[5], '实测难度 110');
+    eq('终局那一格画成绿的（不再是琥珀）', inkInCell(starCells[15], TH().success, 34) > 40, true);
+    eq('一键标灰按钮在终局是灰的', $('#btn-prune').disabled, true);
+    ck('「再来一局」那颗按钮点得到', $('#btn-again').getBoundingClientRect().width > 40, String($('#btn-again').getBoundingClientRect().width));
+
+    // 终局之后棋局本身冻住：星拿不掉、步数不再涨
+    A().tap(starCells[0]);
+    A().prune();
+    A().stroke([otherCells[0]], E().STAR);
+    eq('终局之后点格子改不动读数', `${A().state().steps},${A().state().stars}`, '18,16');
+    eq('终局之后一键标灰不再写格子', A().valueOf(otherCells[0]), E().OUT);
+    eq('这一段没有 console 报错与未捕获异常', errors.join(' | '), '');
+    return report({ moves: won.moves, steps: won.steps, prunes: won.prunes, status: won.status });
+  };
+
+  w.__sc = { boot, gen, play };
 })(window);
