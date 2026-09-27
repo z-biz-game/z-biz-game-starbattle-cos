@@ -1,0 +1,446 @@
+/* Colours, spacing, radii, durations and shadows all come from js/theme.js via applyThemeVars();
+   there are no colour literals here except geometry. That is what keeps the canvas and the
+   stylesheet from drifting into two different-looking games — a region tint is the same value on
+   both sides because both read one object.
+
+   Two numbers in here are law rather than taste, and both are asserted in tools/scenarios.js by
+   measuring the live DOM:
+     * 44px is the smallest touch target anywhere on screen (`min-height` below, and
+       `Cell.min` in js/render/board.js for the grid itself);
+     * the board container scrolls instead of shrinking cells, so a 9×9 on a phone stays tappable. */
+
+[hidden] { display: none !important; }
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 62%, var(--surface) 100%);
+  background-attachment: fixed;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body { touch-action: manipulation; }
+
+#app {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: var(--space-page) var(--space-page) var(--space-inner);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-card);
+  min-height: 100vh;
+}
+
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ---------- top bar ---------- */
+
+.topbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-card);
+}
+
+.brand h1 {
+  margin: 0;
+  font: 700 30px/1.1 var(--font-sans);
+  letter-spacing: 0.2em;
+}
+
+.brand .sub {
+  margin: 4px 0 0;
+  color: var(--ink-dim);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.top-actions { display: flex; gap: var(--space-gutter); }
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-button);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  min-height: 44px;
+  padding: 10px 16px;
+  box-shadow: var(--shadow-pop);
+  transition: background var(--dur-tap) var(--ease-ease),
+              border-color var(--dur-tap) var(--ease-ease),
+              transform var(--dur-tap) var(--ease-spring);
+}
+
+button:active { transform: translateY(1px); }
+button:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+button:disabled { opacity: 0.42; cursor: default; box-shadow: none; }
+
+button.ghost:hover:not(:disabled) { border-color: var(--line-heavy); background: var(--surface-lift); }
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #14100a;
+  font-weight: 700;
+}
+
+button.primary:hover { background: var(--accent-edge); }
+
+button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+button.link {
+  border: 0;
+  background: none;
+  color: var(--ink-faint);
+  padding: 0 4px;
+  min-height: 24px;
+  text-decoration: underline;
+  font-size: 12px;
+  box-shadow: none;
+}
+
+.daily { width: 100%; text-align: left; color: var(--ink-dim); font-size: 13px; }
+
+/* ---------- views ---------- */
+
+main { flex: 1; }
+
+.view { animation: rise var(--dur-base) var(--ease-ease) both; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* The system preference is honoured by js/theme.js (prefersReducedMotion) and the in-game toggle;
+   both land on the same attribute, so there is one place that says "stop moving". */
+:root[data-motion="reduced"] .view,
+:root[data-motion="reduced"] button,
+:root[data-motion="reduced"] #win-veil { animation: none; transition: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .view, #win-veil, button { animation: none !important; transition: none !important; }
+}
+
+/* ---------- menu ---------- */
+
+.menu-hero h2 {
+  margin: 0 0 6px;
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.menu-hero p {
+  margin: 0;
+  max-width: 78ch;
+  color: var(--ink-dim);
+  font-size: 13.5px;
+  line-height: 1.75;
+}
+
+.menu-cols {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) 1fr;
+  gap: var(--space-card);
+  margin-top: var(--space-card);
+  align-items: start;
+}
+
+.col { display: flex; flex-direction: column; gap: var(--space-inner); }
+
+.col-title {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: 600;
+}
+
+.tiers { display: flex; flex-direction: column; gap: 8px; }
+
+.tier {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-inner);
+  text-align: left;
+  padding: 13px 15px;
+}
+
+.tier .tier-name { font-weight: 700; }
+.tier .tier-meta { color: var(--ink-dim); font-size: 12px; }
+.tier .tier-best { color: var(--ink-faint); font-size: 12px; text-align: right; }
+.tier:hover { border-color: var(--line-heavy); background: var(--surface-lift); }
+
+.resume {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-inner);
+  padding: 12px 14px;
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-card);
+  background: var(--accent-soft);
+}
+
+.resume-txt { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.resume-txt span { color: var(--ink-dim); font-size: 12px; }
+
+.records {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.records li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-chip);
+  padding: 9px 11px;
+  background: var(--surface);
+  font-size: 12px;
+  box-shadow: var(--shadow-inset);
+}
+
+.records b { font-size: 13px; }
+.records span { color: var(--ink-dim); }
+.records i { grid-column: 1 / -1; font-style: normal; color: var(--ink-faint); font-size: 11px; }
+
+.rules {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+
+.rules b { color: var(--ink); }
+
+.rules-note {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--ink-faint);
+}
+
+.rules-note b { color: var(--ink-dim); }
+
+/* ---------- game ---------- */
+
+#view-game {
+  display: grid;
+  grid-template-columns: 1fr minmax(268px, 310px);
+  gap: var(--space-card);
+  align-items: start;
+}
+
+.stage {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: var(--space-card);
+  box-shadow: var(--shadow-card);
+  min-width: 0;
+}
+
+.stage-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.puzzle-name { font-weight: 700; letter-spacing: 0.08em; }
+
+.chip {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-chip);
+  padding: 4px 9px;
+  font-size: 12px;
+  color: var(--ink-dim);
+  background: var(--bg-bottom);
+}
+
+#board-wrap {
+  position: relative;
+  align-self: center;
+  max-width: 100%;
+  overflow: auto;
+  /* A board that does not fit scrolls; it never shrinks its cells under 44px. See `layoutFor`. */
+  overscroll-behavior: contain;
+}
+
+#board {
+  display: block;
+  border-radius: var(--radius-card);
+  touch-action: none; /* a drag paints cells — the browser must not read it as a page scroll */
+  box-shadow: var(--shadow-inset);
+  cursor: crosshair;
+}
+
+.conflict-line {
+  margin: 0;
+  min-height: 18px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+
+#state-line[data-kind="bad"] { color: var(--error); }
+#state-line[data-kind="good"] { color: var(--accent); }
+#state-line[data-kind="info"] { color: var(--ink-dim); }
+
+#win-veil {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(8, 11, 22, 0.78);
+  border-radius: var(--radius-card);
+  animation: rise var(--dur-base) var(--ease-ease) both;
+}
+
+.win-card {
+  text-align: center;
+  padding: var(--space-card);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-card);
+  background: var(--surface-lift);
+  box-shadow: var(--shadow-card);
+  max-width: 86%;
+}
+
+.win-card h3 { margin: 0 0 6px; font-size: 19px; }
+.win-card p { margin: 0 0 8px; font-size: 13px; color: var(--ink-dim); line-height: 1.6; }
+.win-record { color: var(--success) !important; font-weight: 700; }
+.win-actions { display: flex; gap: var(--space-gutter); justify-content: center; }
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-inner);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: var(--space-card);
+  box-shadow: var(--shadow-card);
+}
+
+.modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mode { text-align: center; letter-spacing: 0.06em; }
+
+.acts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.acts .primary { grid-column: 1 / -1; }
+.acts .primary span { margin-left: 6px; }
+.acts .free {
+  margin-left: 6px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-chip);
+  padding: 1px 5px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-inner);
+}
+
+.stat { display: flex; justify-content: space-between; gap: 6px; font-size: 12.5px; color: var(--ink-dim); }
+.stat b { color: var(--ink); }
+/* Only ever set on the 冲突 row, and only from `game.diag` — a half-filled board is not a
+   violation, so this class must not become the colour of ordinary progress. */
+.stat.bad b { color: var(--error); }
+
+.hint-box {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-chip);
+  padding: 11px 12px;
+  background: var(--bg-bottom);
+  box-shadow: var(--shadow-inset);
+}
+
+.hint-box h4 {
+  margin: 0 0 5px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--hint);
+}
+
+.hint-box p { margin: 0; font-size: 12.5px; line-height: 1.65; color: var(--ink-dim); }
+.hint-box b { color: var(--ink); }
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 11.5px;
+  color: var(--ink-dim);
+}
+
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.sw { width: 11px; height: 11px; border-radius: var(--radius-cell); display: inline-block; }
+.sw-region { background: linear-gradient(135deg, var(--region-0) 0 50%, var(--region-1) 50% 100%); box-shadow: inset 0 0 0 1px var(--region-border); }
+.sw-star { background: var(--accent); }
+.sw-mark { background: var(--mark); }
+.sw-bad { background: var(--error); }
+.sw-hint { background: var(--hint); }
+
+.keyhint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--ink-faint);
+}
+
+.keyhint b { color: var(--ink-dim); font-weight: 600; }
+
+.foot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-card);
+  align-items: center;
+  color: var(--ink-faint);
+  font-size: 11.5px;
+  line-height: 1.6;
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-inner);
+}
+
+.foot code { font-family: var(--font-mono); color: var(--ink-dim); }
+
+@media (max-width: 900px) {
+  #view-game { grid-template-columns: 1fr; }
+  .menu-cols { grid-template-columns: 1fr; }
+  .foot { flex-direction: column; align-items: flex-start; }
+}
+
+@media (max-width: 520px) {
+  #app { padding: var(--space-inner) var(--space-inner) var(--space-gutter); }
+  .stage, .panel { padding: var(--space-inner); }
+  .stats { grid-template-columns: 1fr; }
+  .brand h1 { font-size: 26px; }
+}
