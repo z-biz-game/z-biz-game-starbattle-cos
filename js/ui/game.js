@@ -157,6 +157,10 @@ export class Game {
     if (step.kind === 'prune') this.prunes = Math.max(0, this.prunes - 1);
     else if (step.kind !== 'hint') this.moves = Math.max(0, this.moves - 1);
     this.recompute();
+    // 撤销之后局面可能已经不再是「赢下的那一张」，所以判胜要重算一次。少了这一句，「赢 → 撤销」
+    // 会留下一张 status 仍是 won、星数却读 0/16 的自相矛盾的面板：tap / stroke / prune / hint 都在
+    // 终局时早退，玩家唯一能把棋盘改回未完成状态的动作就是这个漏了判胜的撤销。
+    this.checkWin();
     return step;
   }
 
@@ -183,7 +187,12 @@ export class Game {
         return { cell: stars[0] != null ? stars[0] : u.cells[0], why: `${u.name} 只剩 ${free.length} 格没定，凑不满 2 颗（已有 ${stars.length} 颗）` };
       }
       const grey = u.cells.find((t) => st[t] === OUT);
-      return { cell: stars[0] != null ? stars[0] : grey, why: `${u.name} 已经没有合法摆法：没定的格两两相邻，放不下 2 颗不挨着的星` };
+      // 这一枝也必须指出一格**画得出红框**的格子。该区域可能一颗星、一个灰点都没有（只剩几个
+      // 两两相邻的空格），那时 `stars[0]` 和 `grey` 都是 undefined，而 board.draw 的
+      // `pulse.cell != null` 守卫会把整枝丢掉 —— 面板说着「先看红框那一格」，盘上一格红框也没有。
+      // 区域自己至少有一格，拿它兜底，指的就是这句话正在讲的那个单元。
+      const point = stars[0] != null ? stars[0] : grey != null ? grey : u.cells[0];
+      return { cell: point, why: `${u.name} 已经没有合法摆法：没定的格两两相邻，放不下 2 颗不挨着的星` };
     }
     if (this.stuck) {
       const last = this.steps[this.steps.length - 1];

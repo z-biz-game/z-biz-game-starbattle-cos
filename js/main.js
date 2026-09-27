@@ -356,6 +356,11 @@ function useHint() {
   Sound.hint();
   syncAll();
   readLine();
+  // 提示收官也是收官：`game.hint()` 里 commit 已经判过胜，status 此刻就是 won，但胜利结算只有
+  // onWin() 一处 —— 不走它就没有遮罩、没有胜利卡，档上的 best/solve 一条也不写。用提示走完一局是
+  // 正常玩法，不能是这条链上唯一没接上的一环。（afterStep 走的是同一个 if，flushResume 在 won 时
+  // 自己早退，所以这里两句都保留原样。）
+  if (game.status === 'won') onWin();
   flushResume();
 }
 
@@ -367,6 +372,9 @@ function undo() {
     setLine('没有可撤销的一笔了。', 'info');
     return;
   }
+  // 撤销能把赢下的局面退回未完成（Game.undo() 会重算 checkWin），遮罩就得跟着收起来，否则胜利卡压在
+  // 一盘还有空格的棋盘上，而 #stat-stars 已经不再写着 16/16。
+  if (game.status !== 'won') el.veil.hidden = true;
   Sound.undo();
   syncAll();
   readLine();

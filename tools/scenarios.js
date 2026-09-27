@@ -210,6 +210,29 @@
     }
     return hit;
   }
+  // Did the pulse ring actually land on *this cell's* box? `board.draw` strokes it on the cell rect
+  // inset by 2 px (js/render/board.js:179-184, `roundRect(r.x + 2, r.y + 2, cell - 4, cell - 4)` with
+  // lineWidth `max(2.5, cell * 0.09)`), so the stroke's centre line is a known distance from the
+  // centre. Sampling exactly that line separates "a red box was painted on this cell" from "some red
+  // pixels happen to sit in this cell's square" — a star glyph reaches only 0.31 cell from the centre
+  // (`Cell.starScale / 2`), so it can never fake a hit here.
+  const PULSE_SAMPLE_DIRS = [
+    [1, 0], [-1, 0], [0, 1], [0, -1],
+    [0.92, 0.39], [0.92, -0.39], [-0.92, 0.39], [-0.92, -0.39],
+    [0.39, 0.92], [0.39, -0.92], [-0.39, 0.92], [-0.39, -0.92],
+  ];
+  function ringOnCellRect(t, color, tol = 24) {
+    const g = geo().geo;
+    const rad = g.cell / 2 - 2;
+    const cx = (t % g.size) * g.cell + g.x + g.cell / 2;
+    const cy = (((t / g.size) | 0) * g.cell) + g.y + g.cell / 2;
+    const want = hex(color);
+    let hit = 0;
+    for (const [ux, uy] of PULSE_SAMPLE_DIRS) {
+      if (near(pixel(cx + ux * rad, cy + uy * rad), want, tol)) hit++;
+    }
+    return hit;
+  }
 
   // ==================================================================== 1. boot
   // The page comes up, its test surface is attached, and the menu is the thing on screen — with
@@ -664,5 +687,404 @@
     return report({ moves: won.moves, steps: won.steps, prunes: won.prunes, status: won.status });
   };
 
-  w.__sc = { boot, gen, play };
+  // ---- hint ----------------------------------------------------------------------
+  //
+  // Every number in this block was measured by driving the shipped `Game` class in node (the hint
+  // path touches no DOM, so node and Chrome run the identical object) on the same pinned trainee-gate
+  // board `play` uses. That is deliberate: the sentence, the cell, the rule name and the charged
+  // count are written down *before* looking at the browser, so a drift in either copy goes red
+  // instead of being re-measured into the expectation.
+  const hint = async () => {
+    const c = GEN_CASES[0];
+    const g = await open(c.tier, c.seed);
+    const board = g.board;
+    const stars = bitsOf(c.stars);
+    const E_STAR = E().STAR;
+    const E_OUT = E().OUT;
+    eq('记号常量：空 0 / 星 1 / 灰 2（本场景里的 1、2 就是它）', [E().EMPTY, E_STAR, E_OUT].join(','), '0,1,2');
+
+    // The first six presses, cell / rule / sentence pinned from node.
+    const HINT_HEAD = [
+      { press: 1, cell: 14, value: 2, rule: '摆不下', unit: '第7区', nf: true,
+        why: '第2行7列 不在 第7区 任何一种合法摆法里（第7区 还差 2 颗星，谁跟它配都不行）——标灰' },
+      { press: 2, cell: 37, value: 1, rule: '只剩这一对', unit: '第8区', nf: true,
+        why: '第8区 还差 2 颗星，可放格有 4 个，但互不相邻的摆法只剩一种——第5行6列 必须在内' },
+      { press: 3, cell: 53, value: 1, rule: '只剩这一对', unit: '第8区', nf: false,
+        why: '第8区 还差 2 颗星，可放格有 4 个，但互不相邻的摆法只剩一种——第7行6列 必须在内' },
+      { press: 4, cell: 45, value: 2, rule: '摆不下', unit: '第8区', nf: false,
+        why: '第6行6列 不在 第8区 任何一种合法摆法里（第8区 还差 2 颗星，谁跟它配都不行）——标灰' },
+      { press: 5, cell: 46, value: 2, rule: '摆不下', unit: '第8区', nf: false,
+        why: '第6行7列 不在 第8区 任何一种合法摆法里（第8区 还差 2 颗星，谁跟它配都不行）——标灰' },
+      { press: 6, cell: 28, value: 2, rule: '星的邻域', unit: null, nf: true,
+        why: '第5行6列 放了星，它的八邻域（含斜角）都不能再放——第4行5列 标灰' },
+    ];
+    // The 62-press route, measured end to end in node.
+    const WALK = {
+      charged: 62, script: 64, stars: 16, marked: 46, remaining: 2,
+      tally: '星的邻域=26,满额排除=14,只差这些=7,摆不下=6,只剩这一对=9,试放即死=0',
+      weight: 108, score: 110, head: 40, inside: 21, outside: '29:摆不下@第7行2列',
+    };
+    const inkArr = () => Int8Array.from(Array.from({ length: board.n }, (_, t) => A().valueOf(t)));
+    const inkList = () => Array.from({ length: board.n }, (_, t) => A().valueOf(t));
+
+    eq('提示脚本的行数就是 gen 钉下的推导步数', A().state().script, WALK.script);
+    eq('开局一次提示也没用', `${A().state().hints},${A().state().cursor},${A().state().steps}`, '0,0,0');
+    eq('提示计数两处读数都从 0 起', `${text('#stat-hints')},${text('#hint-count')}`, '0,0');
+
+    let headAgree = 0;
+    let insideAgree = 0;
+    const usedRule = {};
+    const press = (row) => {
+      // `nextForced` is the engine's own "what do the clues force right now" call. Where node says it
+      // names the very cell this press writes, the button provably is not an answer reveal.
+      if (row && row.nf) {
+        const nf = E().nextForced(board, inkArr());
+        eq(`第 ${row.press} 次提示点名的格与 nextForced 同源`, `${nf.cell},${nf.value},${nf.rule.name}`,
+          `${row.cell},${row.value},${row.rule}`);
+      }
+      const sweep = E().propagate(board, inkArr());
+      const cur = A().state().cursor;
+      const scriptRow = A().game.script[cur];
+      const before = inkList();
+      $('#btn-hint').click();
+      const k = before.length ? A().state().hints : 0;
+      const served = `${scriptRow.cell},${scriptRow.value}`;
+      const found = sweep.found || [];
+      if (found.length && `${found[0].cell},${found[0].value}` === served) headAgree++;
+      else if (found.some((f) => `${f.cell},${f.value}` === served)) insideAgree++;
+      usedRule[text('#hint-rule')] = (usedRule[text('#hint-rule')] || 0) + 1;
+      return { before, k, scriptRow };
+    };
+
+    // ---- the first six presses, in full detail
+    for (const row of HINT_HEAD) {
+      const { before } = press(row);
+      const s = A().state();
+      const k = row.press;
+      eq(`第 ${k} 次提示只往前走一行脚本`, `${s.hints},${s.cursor},${s.steps}`, `${k},${k},${k}`);
+      eq(`第 ${k} 次提示落的就是钉下的那一格`, A().valueOf(row.cell), row.value);
+      const changed = [];
+      for (let t = 0; t < board.n; t++) if (before[t] !== A().valueOf(t)) changed.push(t);
+      eq(`第 ${k} 次提示只改这一格`, changed.join(','), String(row.cell));
+      eq(`第 ${k} 次提示写的值与本盘唯一的解一致（提示不许撒谎）`, stars[row.cell], row.value === E_STAR ? 1 : 0);
+      eq(`第 ${k} 次提示的规则名上屏`, text('#hint-rule'), row.rule);
+      eq(`第 ${k} 次提示的句子就是那条规则自己的话`, text('#hint-line'), row.why);
+      eq(`第 ${k} 次提示不动步数、不动标灰账`, `${s.moves},${s.prunes}`, '0,0');
+      eq(`第 ${k} 次提示后面板两处计数同步`, `${text('#stat-hints')},${text('#hint-count')}`, `${k},${k}`);
+      eq(`第 ${k} 次提示之后面板读数与 state() 同源`, A().state().stars + A().state().marked >= 0, true);
+      readouts(`第 ${k} 次提示之后`);
+    }
+    const captions = [...document.querySelectorAll('.rules li b')].map((e) => e.textContent.trim());
+    for (const row of HINT_HEAD) {
+      ck(`规则「${row.rule}」写在首页六条里（带重量）`, captions.some((x) => x.startsWith(`${row.rule}（`)), captions.join(' '));
+    }
+    eq('提示句必点自己那一格（不许只报结论不报位置）', HINT_HEAD.every((r) => r.why.indexOf(board.cellName(r.cell)) >= 0), true);
+    eq('六条规则的名字都各不相同', new Set(E().RULE_LIST.map((r) => r.name)).size, 6);
+
+    // ---- the pulse ring is the hint colour, and only on the hinted cell
+    const ringCell = HINT_HEAD[5].cell;
+    const ring = inkInCell(ringCell, TH().hint, 24);
+    const control = inkInCell(0, TH().hint, 24);
+    ck(`提示那一格画了蓝环（Palette.hint ${TH().hint}）`, ring > 40, `ink=${ring}`);
+    ck('没提示的格子里一像素蓝环也没有（对照）', control === 0, `ink=${control}`);
+    ck('蓝环不是星墨的琥珀色（两种颜色不许互冒充）', inkInCell(ringCell, TH().accent, 20) === 0,
+      `ink=${inkInCell(ringCell, TH().accent, 20)}`);
+
+    // ---- walk the rest of the route: 一路提示能走完这局
+    let presses = HINT_HEAD.length;
+    let refused = 0;
+    let stalled = 0;
+    const outside = [];
+    while (A().state().status !== 'won' && presses < 140) {
+      const cur = A().state().cursor;
+      const sweep = E().propagate(board, inkArr());
+      const scriptRow = A().game.script[cur];
+      $('#btn-hint').click();
+      presses++;
+      const s = A().state();
+      if (text('#hint-rule') === '提示没有扣次数') { refused++; break; }
+      if (text('#hint-rule') === '推完了') { stalled++; break; }
+      const found = sweep.found || [];
+      const served = `${scriptRow.cell},${scriptRow.value}`;
+      if (found.length && `${found[0].cell},${found[0].value}` === served) headAgree++;
+      else if (found.some((f) => `${f.cell},${f.value}` === served)) insideAgree++;
+      else outside.push(`${s.hints}:${text('#hint-rule')}@${board.cellName(scriptRow.cell)}`);
+      const ruleNow = text('#hint-rule');
+      usedRule[ruleNow] = (usedRule[ruleNow] || 0) + 1;
+      eq(`第 ${s.hints} 次提示只吃掉脚本的一行`, `${s.hints},${s.cursor},${s.moves},${s.prunes}`, `${presses},${presses},0,0`);
+      eq(`第 ${s.hints} 次提示写的值仍与本盘的解一致`, stars[scriptRow.cell], scriptRow.value === E_STAR ? 1 : 0);
+    }
+    const won = A().state();
+    eq('一路提示走完这局', won.status, 'won');
+    eq('走完用的次数、提示数与脚本游标都是 node 钉的那个数',
+      `${presses},${won.hints},${won.cursor}`, `${WALK.charged},${WALK.charged},${WALK.charged}`);
+    eq('这一路没有一次拒绝、也没有一次「推完了」', `${refused},${stalled}`, '0,0');
+    eq('提示替我放满 16 颗星、写下 46 个灰点、还剩 2 格没定',
+      `${won.stars}/${won.target},${won.marked},${won.remaining}`, `${WALK.stars}/16,${WALK.marked},${WALK.remaining}`);
+    eq('通关那一屏 24 个单元全凑满', `${won.satisfied}/${won.units}`, '24/24');
+    eq('全程一步不记在玩家手上、也没用一键标灰', `${won.moves},${won.prunes}`, '0,0');
+    eq('这一路每规则用了几次（难度分的分解）', E().RULE_LIST.map((r) => `${r.name}=${usedRule[r.name] || 0}`).join(','), WALK.tally);
+    const weight = E().RULE_LIST.reduce((a, r) => a + (usedRule[r.name] || 0) * r.weight, 0);
+    eq('用掉的六条折成重量是 108', weight, WALK.weight);
+    eq('剩下的两行都是「星的邻域」，补上就是这盘的难度分 110', `${weight}+2=${weight + 2},${text('#stat-score')}`,
+      `${weight}+2=${WALK.score},${c.score}`);
+    // 提示赢下这一局之后遮罩与胜利卡该不该出现，是 `defects` 场景钉的事（那里是刻意的红）；
+    // 本场景只钉数字这一侧：状态行换成结论、24 个单元凑满。
+    eq('提示赢下这一局之后状态行换成结论', `${text('#state-line')}|${$('#state-line').dataset.kind}`,
+      '每一行、每一列、每一区都正好两颗，谁也不挨着。|good');
+    const agreeAt = headAgree;
+    const insideAt = insideAgree;
+    eq('与单遍扫描同源的比例：40 次报的是扫描头一格、21 次在同一次扫描里', `${agreeAt},${insideAt}`, `${WALK.head},${WALK.inside}`);
+    eq('唯一一处单遍扫描不再复现的提示（脚本是从空盘走的那条路线，不是每步重扫）', outside.join(' | '), WALK.outside);
+    let lied = [];
+    let wrongGrey = [];
+    for (let t = 0; t < board.n; t++) {
+      const v = A().valueOf(t);
+      if (v === E_STAR && stars[t] !== 1) lied.push(board.cellName(t));
+      if (v === E_OUT && stars[t] !== 0) wrongGrey.push(board.cellName(t));
+    }
+    eq('这一路写的每一颗星都在唯一的解上', lied.join(','), '');
+    eq('这一路涂灰的每一格都不在唯一的解上', wrongGrey.join(','), '');
+    eq('终局那一屏没有 console 报错与未捕获异常', errors.join(' | '), '');
+
+    // ---- 终局之后再点提示：main.js 先 return，一格也不许多写
+    const line = text('#hint-line');
+    $('#btn-hint').click();
+    await wait(18);
+    eq('终局之后提示是空操作', `${A().state().hints},${A().state().cursor},${text('#hint-line')}`,
+      `${WALK.charged},${WALK.charged},${line}`);
+
+    // ---- 撤销退还格子，但不退还求助
+    await open(c.tier, c.seed);
+    press(HINT_HEAD[0]);
+    const hintCell = HINT_HEAD[0].cell;
+    eq('第一次提示写的格子', A().valueOf(hintCell), E_OUT);
+    $('#btn-undo').click();
+    await wait(18);
+    const us = A().state();
+    eq('撤销把那格擦回空白', A().valueOf(hintCell), E().EMPTY);
+    eq('撤销退掉那一笔，但提示数不退', `${us.steps},${us.hints},${us.moves}`, '0,1,0');
+    eq('面板上提示数仍写着 1（退回去的帮助也是帮助过）', `${text('#stat-hints')},${text('#hint-count')}`, '1,1');
+    eq('撤销顺手把蓝环收掉了（pulse=null）', inkInCell(hintCell, TH().hint, 24), 0);
+    press();
+    eq('再点提示走的是脚本下一行，不把刚退的那行重播', `${A().state().hints},${A().state().cursor}`, '2,2');
+    eq('第二次提示落的还是钉下的那一格', A().valueOf(HINT_HEAD[1].cell), E_STAR);
+
+    // ---- 反空样本：记号与线索矛盾时提示必须闭嘴，一次也不扣
+    await open(c.tier, c.seed);
+    A().tap(4);
+    A().tap(3);
+    await wait(18);
+    eq('两枚相邻的星本身就是矛盾', `${A().state().adjacent},${A().state().conflicts}`, '1,1');
+    const scriptHead = E().solve(board).rows[0].cell;
+    $('#btn-hint').click();
+    await wait(18);
+    const cs = A().state();
+    eq('矛盾盘面下提示拒绝推导', `${cs.hints},${cs.cursor},${cs.steps}`, '0,0,2');
+    eq('拒绝时说的是「没扣次数」', text('#hint-rule'), '提示没有扣次数');
+    eq('拒绝时的固定话术上屏', text('#hint-line'), '你的记号和线索推出来的结论冲突了：先看红框那一格。');
+    eq('状态行报的是这一对相邻的星', `${text('#state-line')}|${$('#state-line').dataset.kind}`,
+      '第1行4列 与 第1行5列 挨着——任何两颗星都不能相邻（含斜角） —— 记号和线索矛盾，先撤销那一笔。提示没有扣次数。|bad');
+    eq('拒绝时一格也不许多写（脚本头一格仍然空着）', A().valueOf(scriptHead), E().EMPTY);
+    eq('面板上的提示计数没有偷偷 +1', `${text('#stat-hints')},${text('#hint-count')}`, '0,0');
+    const errRing = inkInCell(3, TH().error, 24);
+    ck(`红框画在矛盾那一格上（Palette.error ${TH().error}）`, errRing > 40, `ink=${errRing}`);
+    ck('红框只画在该画的那一格（对照格一像素也没有）', inkInCell(scriptHead, TH().error, 24) === 0,
+      `ink=${inkInCell(scriptHead, TH().error, 24)}`);
+    $('#btn-hint').click();
+    await wait(18);
+    eq('再按还是拒绝、还是不扣', `${A().state().hints},${text('#hint-rule')}`, '0,提示没有扣次数');
+    A().undo();
+    A().undo();
+    await wait(18);
+    eq('把那一笔撤销掉之后提示重新开口、并且开始计数', (() => { $('#btn-hint').click(); return `${A().state().hints}`; })(), '1');
+
+    // ---- 每一行脚本都可反驳：把线索要写的那格先涂反，提示一律闭嘴
+    const rows = E().solve(board).rows;
+    const refusedAt = [];
+    const chargedAt = [];
+    for (let k = 0; k < 12; k++) {
+      A().adopt(A().puzzle);
+      for (let i = 0; i < k; i++) A().useHint();
+      const s1 = A().state();
+      const row = rows[s1.cursor];
+      A().tap(row.cell, row.value === E_STAR ? E_OUT : E_STAR);
+      const inkBefore = inkList().join('');
+      A().useHint();
+      const s2 = A().state();
+      const inkAfter = inkList().join('');
+      if (s2.hints === s1.hints && inkBefore === inkAfter) refusedAt.push(k);
+      else chargedAt.push(`${k}->${s2.hints}`);
+      eq(`位置 ${k}：提示闭嘴时面板话术指着那一格`, text('#hint-rule'), '提示没有扣次数');
+    }
+    eq('12 个位置各试一次：涂反线索要写的那格，提示一律拒绝且不扣次数', refusedAt.join(','), '0,1,2,3,4,5,6,7,8,9,10,11');
+    eq('一个也没有被「将错就错」地补记一次提示', chargedAt.join(','), '');
+    eq('最后一次拒绝之后盘面还停在原位', A().state().cursor, 11);
+    eq('这一段没有 console 报错与未捕获异常', errors.join(' | '), '');
+    return report({
+      charged: WALK.charged, script: WALK.script, head: agreeAt, inside: insideAt,
+      refused: refusedAt.length, weight,
+    });
+  };
+
+  // ---- win -----------------------------------------------------------------------
+  //
+  // 收官这一侧的账，三条都是真实缺陷的回归钉（缺陷在 js 侧已修，这里只钉修好之后的正向事实）：
+  //   1. 一路点「提示」点到收官必须真的结算胜利。`useHint()` 原先三个出口只调 syncAll()，既不过
+  //      `afterStep()` 也不补 `onWin()`，于是 status 已经是 won 而遮罩不出现、#win-meta 是空的、
+  //      `Store.recordBest/recordSolve` 一条都不写。用提示收官是正常玩法，不是调试路径。
+  //   2. 赢完再撤销必须把局面退回未完成。`Game.undo()` 原先不重算 `checkWin()`，main.js 的 undo()
+  //      也不收遮罩，结果是「status 写着 won、#stat-stars 读 15/16、状态行还说都正好两颗」这种
+  //      自相矛盾的面板。
+  //   3. `clash()` 的每一个出口都必须指出一格**画得出红框**的格子。它的第三枝原先给
+  //      `cell: undefined`（该区域一颗星、一个灰点都没有时），而 board.draw 的 `pulse.cell != null`
+  //      守卫会把整枝丢掉 —— 面板说着「先看红框那一格」，盘上一格红框也没有。
+  //
+  // 62 次提示收官、脚本 64 行、难度分 110 这三个数与 `hint` 场景同源：上一轮在 node 里驱动同一个
+  // Game 类量出来的，不是照着浏览器输出回填的。遮罩、纪录与红框则全部读 DOM 和画布像素。
+  const win = async () => {
+    const c = GEN_CASES[0];
+    const g = await open(c.tier, c.seed);
+    const board = g.board;
+    const HINTS_TO_WIN = 62;
+    const t0 = E().Store.totals();
+    const pressHint = async () => {
+      $('#btn-hint').click();
+      return wait(18);
+    };
+    eq('记号常量：空 0 / 星 1 / 灰 2（下面的驱动就用它）', [E().EMPTY, E().STAR, E().OUT].join(','), '0,1,2');
+    eq('这一局开局没赢', A().state().status, 'playing');
+
+    // ---- 1. 一路点提示点到收官：胜利必须真的发生
+    await pressHint();
+    await pressHint();
+    await pressHint();
+    const mid = E().Store.resume();
+    eq('三次提示之后存档位上确实躺着这一盘未完成', `${A().state().hints},${!!mid},${mid && mid.seed},${mid && mid.hints},${mid && mid.moves}`, '3,true,trainee-gate,3,0');
+    let presses = 3;
+    while (A().state().status !== 'won' && presses < 140) {
+      await pressHint();
+      presses++;
+    }
+    const won = A().state();
+    eq(`一路点到第 ${HINTS_TO_WIN} 次提示赢下这局`, `${presses},${won.status},${won.hints}`, `${HINTS_TO_WIN},won,${HINTS_TO_WIN}`);
+    eq('提示收官也是满盘：16 颗星、24 个单元全凑满', `${won.stars}/${won.target},${won.satisfied}/${won.units}`, '16/16,24/24');
+    ck('提示收官必须出现胜利遮罩，而且点得到（不是只换了一行状态文字）',
+      shown('#win-veil') && hitAt('#win-veil') === 'hit', `shown=${shown('#win-veil')} hit=${hitAt('#win-veil')}`);
+    eq('提示收官的状态行换成结论', `${text('#state-line')}|${$('#state-line').dataset.kind}`,
+      '每一行、每一列、每一区都正好两颗，谁也不挨着。|good');
+    const meta = text('#win-meta').split(' · ');
+    eq('胜利卡：档名与尺寸（onWin 没跑过这里就是空串）', meta[0], '初学 8×8');
+    ck('胜利卡：计时写成 mm:ss（值是墙钟，只钉形状）', /^\d{2}:\d{2}$/.test(meta[1] || ''), meta[1]);
+    eq('胜利卡：一步也没记在玩家手上', meta[2], '步数 0');
+    eq('胜利卡：写着这一局用掉的提示数', meta[3], '提示 62');
+    eq('胜利卡：一次一键标灰也没用', meta[4], '一键标灰 0 次');
+    eq('胜利卡：复读这一盘的实测难度', meta[5], '实测难度 110');
+    const best1 = E().Store.best(c.tier);
+    eq('档上的纪录写着这局求助 62 次、0 步、8×8', `${best1 && best1.hints},${best1 && best1.moves},${best1 && best1.size}`, '62,0,8');
+    const t1 = E().Store.totals();
+    eq('recordSolve 记下了这一次通关（次数 +1、提示 +62）', `${t1.solved - t0.solved},${t1.hints - t0.hints},${t1.ms > 0}`, '1,62,true');
+    eq('通关之后不留残局存档', E().Store.resume(), null);
+    $('#btn-menu').click();
+    await wait(24);
+    eq('回选档屏之后存档位仍是空的（回到菜单不许把赢下的局面又写回去）', E().Store.resume(), null);
+    eq('菜单不再摆出一张可以继续的残局卡', shown('#resume-card'), false);
+    const li = document.querySelectorAll('#record-list li')[0];
+    eq('纪录表第一行是初学档', li.querySelector('span').textContent, '初学');
+    ck('纪录表写着通关计时（mm:ss）', /^\d{2}:\d{2}$/.test(li.querySelector('b').textContent), li.querySelector('b').textContent);
+    eq('纪录表写着提示 62 · 步数 0', li.querySelector('i').textContent, '提示 62 · 步数 0');
+    const tierBest = document.querySelector('.tier[data-tier="trainee"] .tier-best').textContent;
+    ck('档位卡上也写着同一个纪录（计时 + 提示 62）', /^\d{2}:\d{2} · 提示62$/.test(tierBest), tierBest);
+    A().show('game');
+    await wait(24);
+    ck('回到棋盘，胜利遮罩还挂着', shown('#win-veil') && hitAt('#win-veil') === 'hit', hitAt('#win-veil'));
+
+    // ---- 2. 赢完再撤销：局面必须退回未完成
+    $('#btn-undo').click();
+    await wait(24);
+    const us = A().state();
+    eq('赢后撤销一笔：status 回到 playing，星数读数一起改口',
+      `${us.status},${us.stars}/${us.target},${text('#stat-stars')},${us.steps},${us.hints},${us.moves}`, 'playing,15/16,15/16,61,62,0');
+    eq('遮罩跟着收回去，不再吞点击', `${shown('#win-veil')},${hitAt('#win-veil')}`, 'false,no-box');
+    eq('状态行说的是「还差一颗」而不是结论（与 #stat-stars 同一件事）',
+      `${text('#state-line')}|${$('#state-line').dataset.kind}`, '还差 1 颗星。3 格没定，21/24 个单元已经凑满。|info');
+    readouts('赢后撤销');
+    eq('一键标灰按钮重新可用（终局确实解除了）', $('#btn-prune').disabled, false);
+    eq('撤销不掉求助：提示数不退账', us.hints, HINTS_TO_WIN);
+    const back = E().Store.resume();
+    eq('撤销之后是一盘没下完的棋，存档位上重新有了它', `${!!back},${back && back.seed},${back && back.hints},${back && back.moves}`, 'true,trainee-gate,62,0');
+    const t2 = E().Store.totals();
+    eq('撤销不追溯通关账（已经赢过的那一次不许被改回去）', `${t2.solved - t0.solved},${t2.hints - t0.hints}`, '1,62');
+    const lastCell = A().game.lastHint.cell;
+    eq('撤销抬走的就是第 62 次提示写下的那一格（第 8 行第 4 列）',
+      `${A().valueOf(lastCell)},${lastCell}`, `${E().EMPTY},59`);
+    A().tap(lastCell);
+    await wait(24);
+    const w2 = A().state();
+    eq('自己把最后一颗星摆回去照样判胜（终局守卫已经解除）',
+      `${w2.status},${w2.stars}/${w2.target},${w2.moves},${w2.hints}`, 'won,16/16,1,62');
+    ck('第二次收官同样出现遮罩', shown('#win-veil') && hitAt('#win-veil') === 'hit', hitAt('#win-veil'));
+    const m2 = text('#win-meta').split(' · ');
+    eq('胜利卡改口：这一步记在玩家手上、提示仍是 62', `${m2[2]},${m2[3]}`, '步数 1,提示 62');
+    const best2 = E().Store.best(c.tier);
+    eq('档上的纪录仍是求助更少步数更省的那一局', `${best2.hints},${best2.moves}`, '62,0');
+    const t3 = E().Store.totals();
+    eq('两次通关都记进总数（+2 次、+124 提示）', `${t3.solved - t0.solved},${t3.hints - t0.hints}`, '2,124');
+    eq('这一段没有 console 报错与未捕获异常', errors.join(' | '), '');
+
+    // ---- 3. clash() 的每一个出口：指出的那一格必须画得出红框
+    // 九个驱动覆盖 clash() 的全部 return：相邻枝、单元三星枝、凑不满枝的两个兜底出口、
+    // 「没有合法摆法」枝的三个出口（有星 / 只有灰 / 星和灰都没有 —— 最后那个就是 cell: undefined），
+    // 以及一个「什么都没破、只是把自己堵死」的 stuck 枝。cell/why 逐条在 node 里驱动同一个 Game 类量出来。
+    const CLASH_CASES = [
+      { tag: '两颗星挨着', unit: null, cell: 3, drive: [[4, E().STAR], [3, E().STAR]],
+        why: '第1行4列 与 第1行5列 挨着——任何两颗星都不能相邻（含斜角）' },
+      { tag: '一行三颗星', unit: 0, cell: 4, drive: [[0, E().STAR], [2, E().STAR], [4, E().STAR]],
+        why: '第1行里有 3 颗星，每行只能 2 颗' },
+      { tag: '一行全涂灰（一颗星没有）', unit: 0, cell: 0, drive: [0, 1, 2, 3, 4, 5, 6, 7].map((t) => [t, E().OUT]),
+        why: '第1行 只剩 0 格没定，凑不满 2 颗（已有 0 颗）' },
+      { tag: '一行一颗星加七格灰', unit: 0, cell: 0, drive: [[0, E().STAR]].concat([1, 2, 3, 4, 5, 6, 7].map((t) => [t, E().OUT])),
+        why: '第1行 只剩 0 格没定，凑不满 2 颗（已有 1 颗）' },
+      { tag: '第8区只剩相邻两格·有灰无星', unit: 23, cell: 37, drive: [[37, E().OUT], [46, E().OUT]],
+        why: '第8区 已经没有合法摆法：没定的格两两相邻，放不下 2 颗不挨着的星' },
+      { tag: '第8区里那颗星（记号 45）', unit: 23, cell: 45, drive: [[45, E().STAR]],
+        why: '第8区 已经没有合法摆法：没定的格两两相邻，放不下 2 颗不挨着的星' },
+      { tag: '第4区既没星也没灰（记号 52）', unit: 19, cell: 51, drive: [[52, E().STAR]],
+        why: '第4区 已经没有合法摆法：没定的格两两相邻，放不下 2 颗不挨着的星' },
+      { tag: '第7区既没星也没灰（记号 30）', unit: 22, cell: 6, drive: [[30, E().STAR]],
+        why: '第7区 已经没有合法摆法：没定的格两两相邻，放不下 2 颗不挨着的星' },
+      { tag: '没破规则但把自己堵死了（灰 8、9、10）', unit: null, cell: 10, drive: [[8, E().OUT], [9, E().OUT], [10, E().OUT]],
+        why: '第2行3列 落下去之后线索就推不下去了：第2行 还差 2 颗星，可它的 2 个可放格配不出不挨着的一对' },
+    ];
+    const CONTROL = 63; // 上面九个格子里没有一格是它，也没有一颗破规则的星落在它上面
+    const pointed = [];
+    for (const k of CLASH_CASES) {
+      A().adopt(A().puzzle);
+      await wait(18);
+      eq(`${k.tag}：先回到一张空盘`, `${A().state().steps},${A().state().hints},${A().state().status}`, '0,0,playing');
+      for (const [t, v] of k.drive) A().tap(t, v);
+      await wait(18);
+      const cl = A().game.clash();
+      ck(`${k.tag}：clash() 必须指出一格（不许是 undefined）`,
+        !!cl && Number.isInteger(cl.cell) && cl.cell >= 0 && cl.cell < board.n, `cell=${cl && cl.cell}`);
+      eq(`${k.tag}：指的就是钉下的那一格、那句话`, `${cl && cl.cell},${cl && cl.why}`, `${k.cell},${k.why}`);
+      if (k.unit !== null) eq(`${k.tag}：指出的那一格属于这句话正在讲的单元`, board.units[k.unit].cells.indexOf(cl.cell) >= 0, true);
+      await pressHint();
+      const s = A().state();
+      eq(`${k.tag}：提示闭嘴、一次也不扣、一格也不许多写`, `${s.hints},${s.cursor},${s.status}`, '0,0,playing');
+      eq(`${k.tag}：面板说「提示没有扣次数」`, text('#hint-rule'), '提示没有扣次数');
+      eq(`${k.tag}：面板让人先看红框那一格`, text('#hint-line'), '你的记号和线索推出来的结论冲突了：先看红框那一格。');
+      eq(`${k.tag}：红框就画在这一格的 cellRect 上（12 个采样点全中）`, ringOnCellRect(cl.cell, TH().error), 12);
+      eq(`${k.tag}：对照格（记号 ${CONTROL}）画不出这个红框`, ringOnCellRect(CONTROL, TH().error), 0);
+      pointed.push(cl.cell);
+    }
+    eq('九个出口各钉到一格（第三、四例都指第 1 行头一格，但走的是两个不同兜底出口）', pointed.join(','), '3,4,0,0,37,45,51,6,10');
+    eq('这一段也没有 console 报错与未捕获异常', errors.join(' | '), '');
+    return report({
+      presses, undoStatus: us.status, wins: t3.solved - t0.solved, clashCells: pointed.join(','),
+    });
+  };
+
+  w.__sc = { boot, gen, play, hint, win };
+
 })(window);

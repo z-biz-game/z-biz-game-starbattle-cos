@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-shot browser verification: real Chrome, real DOM, scripted scenarios.
 #
-#   npm run verify
+#   npm run verify                 # default scenario set: boot gen play hint win
 #   SCENARIOS="play hint" npm run verify
 #   BASE_URL=https://z-biz-game.github.io/z-biz-game-starbattle-cos/ npm run verify
 #   SHOTS=1 npm run verify          # also writes tools/shots/*.png
@@ -100,7 +100,7 @@ echo "boot: starbattle $BOOT at $BASE"
 [ "$BOOT" = "nope" ] && { echo "window.starbattle never appeared at $BASE" >&2; exit 4; }
 
 FAILED=0
-for s in ${SCENARIOS:-boot gen play}; do
+for s in ${SCENARIOS:-boot gen play hint win}; do
   echo "=== $s ==="
   node tools/playtest.cjs scenario "$s" 2>/tmp/starbattle-$s.console.log | tail -1 | sed 's/^RESULT //' | python3 -c "
 import sys, json
