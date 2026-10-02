@@ -19,7 +19,9 @@ function audio() {
       return null;
     }
   }
-  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  // Only wake the context when sound is actually on; a muted game should leave the parked
+  // context parked rather than silently resuming it on every attempted tone.
+  if (enabled && ctx.state === 'suspended') ctx.resume().catch(() => {});
   return ctx;
 }
 
@@ -27,8 +29,9 @@ function audio() {
 // call to this; adding a second voice shape is how a game ends up with sounds that do not belong
 // to the same instrument.
 function tone({ f0, f1 = f0, dur = 0.12, type = 'sine', gain = 0.22, delay = 0 }) {
+  if (!enabled) return;
   const ac = audio();
-  if (!ac || !enabled) return;
+  if (!ac) return;
   const t = ac.currentTime + delay;
   const osc = ac.createOscillator();
   const vol = ac.createGain();
@@ -46,8 +49,25 @@ function tone({ f0, f1 = f0, dur = 0.12, type = 'sine', gain = 0.22, delay = 0 }
 export const Sound = {
   setEnabled(v) {
     enabled = !!v;
+    // 真静音：不只是不发新节点，还要把已经建起来的 AudioContext 挂起，让它在后台真的不跑。
+    // ctx 只有在第一次发声时才懒创建，静音态下 tone() 提前返回、永远不会建它，所以这里可能为空。
+    if (ctx) {
+      const p = enabled ? ctx.resume() : ctx.suspend();
+      if (p && p.catch) p.catch(() => {});
+    }
   },
   enabled: () => enabled,
+
+  setMuted(muted) {
+    Sound.setEnabled(!muted);
+  },
+  isMuted() {
+    return !enabled;
+  },
+  toggleMute() {
+    Sound.setEnabled(!enabled);
+    return enabled;
+  },
 
   // A star is the loud event of this game: up-glide, triangle, the brightest of the set.
   place() {
