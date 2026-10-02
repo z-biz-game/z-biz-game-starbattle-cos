@@ -9,6 +9,7 @@ import { Store } from './store.js';
 import { Game, MODES, markName, STAR, OUT, EMPTY } from './ui/game.js';
 import { BoardView, layoutFor } from './render/board.js';
 import { Sound } from './audio/synth.js';
+import { Anim } from './anim.js';
 import * as Rules from './engine/rules.js';
 import { createBoard, EMPTY as E0, STAR as S0, OUT as O0 } from './engine/board.js';
 import { countSolutions, legalStarSet, UNIQUE, MANY, NONE, OVERBUDGET } from './engine/count.js';
@@ -45,7 +46,6 @@ const view = { name: 'menu', generating: false };
 let game = null;
 let startedAt = 0;
 let pausedMs = 0;
-let pulse = null;
 let preview = null;
 let drag = null;
 const board = new BoardView(el.canvas);
@@ -138,7 +138,8 @@ function adopt(puzzle, { daily = false } = {}) {
   game.daily = daily;
   startedAt = Date.now();
   pausedMs = 0;
-  pulse = null;
+  Anim.clearPulse();
+  Anim.win(false);
   preview = null;
   el.name.textContent = daily ? `日课 · ${dateKey().key}` : puzzle.tierName;
   el.tier.textContent = `${puzzle.size}×${puzzle.size}`;
@@ -258,7 +259,7 @@ function sizeCanvas() {
 
 function draw() {
   if (!game || view.name !== 'game') return;
-  board.draw(game, { pulse, preview, ghost: drag ? null : undefined });
+  board.draw(game, { pulse: Anim.pulseState(), preview, ghost: drag ? null : undefined, twinkle: Anim.twinkleAt });
 }
 
 // ---------------------------------------------------------------- pointer
@@ -337,7 +338,7 @@ function useHint() {
   if (h.conflict) {
     setLine(h.conflict, 'bad');
     Sound.conflict();
-    pulse = { cell: h.cell, color: Palette.error };
+    Anim.firePulse(h.cell, Palette.error);
     el.hintRule.textContent = '提示没有扣次数';
     el.hintLine.textContent = '你的记号和线索推出来的结论冲突了：先看红框那一格。';
     syncAll();
@@ -350,7 +351,7 @@ function useHint() {
     syncAll();
     return;
   }
-  pulse = { cell: h.cell, color: Palette.hint, unitName: h.unit || null };
+  Anim.firePulse(h.cell, Palette.hint, h.unit || null);
   el.hintRule.textContent = h.rule;
   el.hintLine.textContent = h.why;
   Sound.hint();
@@ -367,14 +368,14 @@ function useHint() {
 function undo() {
   if (!game) return;
   const step = game.undo();
-  pulse = null;
+  Anim.clearPulse();
   if (!step) {
     setLine('没有可撤销的一笔了。', 'info');
     return;
   }
   // 撤销能把赢下的局面退回未完成（Game.undo() 会重算 checkWin），遮罩就得跟着收起来，否则胜利卡压在
   // 一盘还有空格的棋盘上，而 #stat-stars 已经不再写着 16/16。
-  if (game.status !== 'won') el.veil.hidden = true;
+  if (game.status !== 'won') { el.veil.hidden = true; Anim.win(false); }
   Sound.undo();
   syncAll();
   readLine();
@@ -415,6 +416,7 @@ function onWin() {
   el.veil.hidden = false;
   el.winMeta.textContent = `${game.daily ? '日课' : game.puzzle.tierName} ${s.size}×${s.size} · ${fmtTime(ms)} · 步数 ${s.moves} · 提示 ${s.hints} · 一键标灰 ${s.prunes} 次 · 实测难度 ${s.score}`;
   el.winRecord.textContent = isRecord ? '这是这一档的新纪录。' : '';
+  Anim.win(true);
   Sound.win();
   setLine('每一行、每一列、每一区都正好两颗，谁也不挨着。', 'good');
   syncAll();
@@ -425,12 +427,35 @@ function onWin() {
 function applySettings() {
   Sound.setEnabled(Store.setting('sound') !== false);
   setReduceMotion(Store.setting('reduceMotion') === true);
+  Anim.setReduced(prefersReducedMotion());
   $('#btn-sound').textContent = `音效 ${Sound.enabled() ? '开' : '关'}`;
   $('#btn-sound').setAttribute('aria-pressed', String(Sound.enabled()));
   $('#btn-motion').textContent = `动效 ${prefersReducedMotion() ? '简' : '全'}`;
   $('#btn-motion').setAttribute('aria-pressed', String(!prefersReducedMotion()));
   document.documentElement.dataset.motion = prefersReducedMotion() ? 'reduced' : 'full';
+  syncFullscreenLabel();
 }
+
+// ---------------------------------------------------------------- fullscreen
+
+// 全屏是真进 Full Screen API，不是把容器 CSS 撑满：requestFullscreen 失败（iframe 没 allow、
+// 旧浏览器、非安全上下文）时静默兜底，绝不抛红——玩家按了没反应，也比控制台一片红好。
+function toggleFullscreen() {
+  const root = document.documentElement;
+  if (document.fullscreenElement) {
+    if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+  } else if (root.requestFullscreen) {
+    root.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+  }
+}
+function syncFullscreenLabel() {
+  const btn = $('#btn-fullscreen');
+  if (!btn) return;
+  const on = !!document.fullscreenElement;
+  btn.textContent = on ? '退出全屏' : '全屏';
+  btn.setAttribute('aria-pressed', String(on));
+}
+document.addEventListener('fullscreenchange', () => { syncFullscreenLabel(); draw(); });
 
 // ---------------------------------------------------------------- bindings
 
@@ -465,6 +490,7 @@ $('#btn-motion').addEventListener('click', () => {
   Store.setSetting('reduceMotion', prefersReducedMotion() ? false : true);
   applySettings();
 });
+$('#btn-fullscreen').addEventListener('click', toggleFullscreen);
 $('#btn-reset').addEventListener('click', () => {
   Store.reset();
   applySettings();
@@ -482,6 +508,7 @@ window.addEventListener('keydown', (ev) => {
   else if (k === '1' || k === 's') setMode(STAR);
   else if (k === '2' || k === 'x') setMode(OUT);
   else if (k === 'm' && game) setMode(game.mode === STAR ? OUT : STAR);
+  else if (k === 'f') toggleFullscreen();
 });
 
 window.addEventListener('resize', () => {
@@ -499,6 +526,7 @@ setInterval(() => {
 applyThemeVars();
 applySettings();
 renderMenu();
+Anim.start(() => draw());
 
 // ---------------------------------------------------------------- the harness surface
 
@@ -574,3 +602,8 @@ window.starbattle = {
     OUT: O0,
   },
 };
+
+// 帧率探针/自建对拍靠 window.starbattleAnim 读"动画是否随帧率漂移"：它暴露 update()（探针据此认
+// 这是可推进的游戏）与一组纯由定步数推出的数值字段（steps/elapsed/ambient/pulseAlpha）——
+// 同一虚拟时长下 30/60/120Hz 恒等，就是"帧率无关"的证据。老 window.starbattle 一个字段没改，CI 不受牵连。
+window.starbattleAnim = Anim;

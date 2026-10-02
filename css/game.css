@@ -16,8 +16,14 @@
 html, body {
   margin: 0;
   min-height: 100%;
-  background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 62%, var(--surface) 100%);
-  background-attachment: fixed;
+  background-color: var(--bg-top);
+  background-image: url('../assets/textures/starfield.png'),
+    linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 62%, var(--surface) 100%);
+  background-repeat: repeat, no-repeat;
+  background-size: 512px 512px, cover;
+  background-position: center, center;
+  background-attachment: fixed, fixed;
+  background-blend-mode: overlay, normal;
   color: var(--ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -28,7 +34,11 @@ body { touch-action: manipulation; }
 #app {
   max-width: 1180px;
   margin: 0 auto;
-  padding: var(--space-page) var(--space-page) var(--space-inner);
+  padding:
+    calc(var(--space-page) + env(safe-area-inset-top))
+    calc(var(--space-page) + env(safe-area-inset-right))
+    calc(var(--space-inner) + env(safe-area-inset-bottom))
+    calc(var(--space-page) + env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
   gap: var(--space-card);

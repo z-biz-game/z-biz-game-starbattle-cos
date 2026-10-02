@@ -72,7 +72,7 @@ export class BoardView {
     return gy * size + gx;
   }
 
-  draw(game, { pulse = null, preview = null, ghost = null } = {}) {
+  draw(game, { pulse = null, preview = null, ghost = null, twinkle = null } = {}) {
     this.game = game;
     const { ctx, geo } = this;
     const { cell, size } = geo;
@@ -134,6 +134,18 @@ export class BoardView {
       if (st[t] !== STAR) continue;
       const p = this.cellCentre(t);
       const onBad = bad.has(t);
+      // 胜利后的呼吸光晕：只由外部传入的定步相位驱动，不碰引擎判定。
+      if (won && twinkle) {
+        const s = twinkle(t);
+        if (s > 0.001) {
+          ctx.globalAlpha = 0.34 * s;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, cell * (0.52 + 0.34 * s), 0, Math.PI * 2);
+          ctx.fillStyle = Palette.accentEdge;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+      }
       star(ctx, p.x, p.y, cell * Cell.starScale * 0.5, won ? Palette.success : onBad ? Palette.error : Palette.accent, Palette.accentEdge);
     }
 
@@ -177,18 +189,23 @@ export class BoardView {
 
     // What a hint just named — the only place the UI is allowed to say "look here".
     if (pulse && pulse.cell != null) {
-      const r = this.cellRect(pulse.cell);
-      ctx.strokeStyle = pulse.color || Palette.hint;
-      ctx.lineWidth = Math.max(2.5, cell * 0.09);
-      roundRect(ctx, r.x + 2, r.y + 2, cell - 4, cell - 4, Radius.cell);
-      ctx.stroke();
-      const unit = pulse.unitName;
-      if (unit) {
-        ctx.font = `600 ${Math.max(10, Math.round(cell * 0.24))}px ${Font.sans}`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        ctx.fillStyle = Palette.hint;
-        ctx.fillText(unit, r.x + cell / 2, r.y + cell - Math.max(12, cell * 0.28));
+      const alpha = pulse.alpha == null ? 1 : pulse.alpha;
+      if (alpha > 0.001) {
+        const r = this.cellRect(pulse.cell);
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = pulse.color || Palette.hint;
+        ctx.lineWidth = Math.max(2.5, cell * 0.09);
+        roundRect(ctx, r.x + 2, r.y + 2, cell - 4, cell - 4, Radius.cell);
+        ctx.stroke();
+        const unit = pulse.unitName;
+        if (unit) {
+          ctx.font = `600 ${Math.max(10, Math.round(cell * 0.24))}px ${Font.sans}`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
+          ctx.fillStyle = Palette.hint;
+          ctx.fillText(unit, r.x + cell / 2, r.y + cell - Math.max(12, cell * 0.28));
+        }
+        ctx.globalAlpha = 1;
       }
     }
   }
