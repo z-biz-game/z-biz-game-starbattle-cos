@@ -574,3 +574,70 @@ window.starbattle = {
     OUT: O0,
   },
 };
+
+// ---- 全屏开关（#btn-fullscreen）----
+// 绑的是本页 HUD 上真实存在的那个按钮。全屏最常见的假实现就是引用一个并不存在的
+// id：点下去什么也不会发生，量具却算它"已实现"。所以这里找不到按钮就直接不装。
+(function bindFullscreen() {
+  const btn = document.getElementById('btn-fullscreen');
+  if (!btn) return;
+  const root = document.documentElement;
+  // 只做特性检测，不嗅探 UA：iOS Safari 是 webkitRequestFullscreen，老 Edge 是 ms 前缀，
+  // 而 UA 字符串随时会改。"有没有这个能力"是查出来的，不是猜出来的。
+  const req = root.requestFullscreen || root.webkitRequestFullscreen || root.msRequestFullscreen;
+  const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+  const current = () => document.fullscreenElement || document.webkitFullscreenElement
+    || document.msFullscreenElement || null;
+
+  // 不支持也要给个说法：只把按钮灰掉而不解释，玩家会以为这功能没做完。
+  const unsupported = () => {
+    btn.disabled = true;
+    btn.title = '这个浏览器不提供元素全屏（iOS Safari 请用「添加到主屏幕」独立打开）';
+  };
+  if (!req) unsupported();
+
+  // fullscreen 返回 Promise，被拒时必须吃掉：iOS Safari 对多数非 video 元素直接拒绝，
+  // 让这个 rejection 冒泡出去会变成一条未捕获错误，整局游戏跟着挂。
+  const settle = (p) => { if (p && p.catch) p.catch(unsupported); };
+
+  // 进出都能走：已经全屏时这次调用是退出，不是"再进一次"。
+  function toggle() {
+    try {
+      if (current()) {
+        if (exit) settle(exit.call(document));
+      } else if (req) {
+        settle(req.call(root));
+      } else {
+        unsupported();
+      }
+    } catch (e) {
+      unsupported();
+    }
+  }
+
+  // Esc 和系统手势退出都不经过我们的代码，按钮状态只能靠 fullscreenchange 回写，
+  // 否则用户已经退出、HUD 还停在"退出全屏"，下一次点击反而会重新进全屏。
+  function sync() {
+    const on = !!current();
+    btn.setAttribute('aria-pressed', String(on));
+    btn.textContent = on ? "退出全屏" : "全屏";
+    btn.title = "全屏" + '（F）';
+    const body = document.body;
+    if (body && body.classList) body.classList.toggle('fullscreen', on);
+  }
+
+  btn.addEventListener('click', toggle);
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'f' && ev.key !== 'F') return;
+    const t = ev.target;
+    // 盘号 / 种子这类输入框里打字不能触发全屏，否则玩家输 seed 输到一半屏幕没了。
+    if (t && /input|textarea|select/i.test(t.tagName || '')) return;
+    if (ev.repeat || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    ev.preventDefault();
+    toggle();
+  });
+  window.addEventListener('fullscreenchange', sync);
+  window.addEventListener('webkitfullscreenchange', sync);
+  window.addEventListener('MSFullscreenChange', sync);
+  sync();
+})();
