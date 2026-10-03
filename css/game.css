@@ -468,3 +468,14 @@ body {
 .fixed-bottom, .bottom-bar, .hud-bottom, footer.app-footer {
   padding-bottom: calc(var(--sab) + env(safe-area-inset-bottom, 0px));
 }
+
+/* 手机档：button.link 的 min-height 是 24px——它长得像一行链接，但「清空存档」是一次
+   不可撤销的操作。390×844 实测 btn-reset 56x24，是这一屏里唯一低于 44px 触摸下限的控件。
+   只把命中盒撑回下限，字面（下划线、12px、灰色）照旧。 */
+@media (max-width: 420px) {
+  button.link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+}
