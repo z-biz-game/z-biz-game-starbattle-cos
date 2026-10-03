@@ -11,7 +11,9 @@
     "test": "node tools/engine-test.mjs",
     "balance": "node tools/balance.mjs",
     "verify": "bash tools/verify.sh",
-    "check": "for f in js/*.js js/*/*.js; do node --check \"$f\" || exit 1; done && node --check server.cjs && node --check electron/main.cjs && node --check electron/preload.cjs && for f in tools/*.mjs tools/scenarios.js; do if [ ! -f \"$f\" ]; then echo \"check: 未落地，跳过 $f\"; continue; fi; node --check \"$f\" || exit 1; done && echo OK"
+    "check": "for f in js/*.js js/*/*.js; do node --check \"$f\" || exit 1; done && node --check server.cjs && node --check electron/main.cjs && node --check electron/preload.cjs && for f in tools/*.mjs tools/scenarios.js; do if [ ! -f \"$f\" ]; then echo \"check: 未落地，跳过 $f\"; continue; fi; node --check \"$f\" || exit 1; done && echo OK",
+    "deploy-set": "node tools/deploy-set.mjs",
+    "deploy-set:selftest": "node tools/deploy-set-selftest.mjs"
   },
   "keywords": [
     "game",
