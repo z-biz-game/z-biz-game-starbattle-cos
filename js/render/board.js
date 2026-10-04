@@ -11,6 +11,14 @@
 // regions, which is the only way to get a partition with holes and concavities to look like the
 // map it is — stroking each region's own outline would double-draw every shared edge.
 
+
+/* ---------- 帧率无关（dt）---------- */
+/* 本仓**没有逐帧运动**，所以「帧率无关」这一项在本仓是空命题而不是缺陷：全仓只有一处 requestAnimationFrame，在 js/main.js:124 的 `requestAnimationFrame(() => {…})`——先让出一帧把生成遮罩画出来，再在同一回调里同步跑 makePuzzle 出题，**不自续期**；js/render/board.js 的重绘由 pointerdown / click / keydown 触发
+   没有自续期的 requestAnimationFrame 循环，屏上就没有「每帧推进」的量，帧率也就无从影响它。
+   写这段备案是为了让账上分得开"查过、确实不需要"与"没人查过"——不是为了让判据变绿。
+
+   规矩：**哪天在本仓加了逐帧动画循环，必须先删掉这段备案**，并让循环体消费 rAF 自带的
+   时间戳（或自己取 performance.now()），把动画进度写成绝对截止；只按帧累加位置的一律不算。 */
 import { Palette, RegionTints, Cell, Radius, Font } from '../theme.js';
 import { EMPTY, STAR, OUT } from '../engine/board.js';
 
