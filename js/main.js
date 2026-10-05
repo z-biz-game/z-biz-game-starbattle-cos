@@ -46,6 +46,7 @@ const view = { name: 'menu', generating: false };
 let game = null;
 let startedAt = 0;
 let pausedMs = 0;
+let paused = false; // 真暂停：时钟不再累加、定步长一步不走，不是盖一层遮罩
 let preview = null;
 let drag = null;
 const board = new BoardView(el.canvas);
@@ -54,7 +55,7 @@ const board = new BoardView(el.canvas);
 
 const clock = () => {
   if (!game || !startedAt) return pausedMs;
-  return pausedMs + Math.max(0, Date.now() - startedAt);
+  return pausedMs + (paused ? 0 : Math.max(0, Date.now() - startedAt));
 };
 const fmtTime = (ms) => {
   const s = Math.floor(ms / 1000);
@@ -138,9 +139,12 @@ function adopt(puzzle, { daily = false } = {}) {
   game.daily = daily;
   startedAt = Date.now();
   pausedMs = 0;
+  paused = false;
+  Anim.setPaused(false);
   Anim.clearPulse();
   Anim.win(false);
   preview = null;
+  drag = null;
   el.name.textContent = daily ? `日课 · ${dateKey().key}` : puzzle.tierName;
   el.tier.textContent = `${puzzle.size}×${puzzle.size}`;
   el.hintCount.textContent = '0';
@@ -181,6 +185,7 @@ function rulesLine(puzzle) {
 
 function syncAll() {
   if (!game) return;
+  syncPauseUI();
   const s = game.state();
   el.time.textContent = fmtTime(clock());
   $('#stat-moves').textContent = s.moves;
@@ -269,7 +274,7 @@ function draw() {
 // gesture that starts on a mark of this mode's kind erases instead. There is no drag-to-swap here:
 // in a two-stars-per-row puzzle an accidental swap is the worst possible outcome.
 el.canvas.addEventListener('pointerdown', (ev) => {
-  if (!game || game.status === 'won') return;
+  if (!game || game.status === 'won' || paused) return;
   const t = board.hitCell(ev.clientX, ev.clientY);
   if (t < 0) return;
   el.canvas.setPointerCapture(ev.pointerId);
@@ -332,7 +337,7 @@ function afterStep(step, soundHint) {
 }
 
 function useHint() {
-  if (!game || game.status === 'won') return;
+  if (!game || game.status === 'won' || paused) return;
   const h = game.hint();
   if (!h) return;
   if (h.conflict) {
@@ -366,7 +371,7 @@ function useHint() {
 }
 
 function undo() {
-  if (!game) return;
+  if (!game || paused) return;
   const step = game.undo();
   Anim.clearPulse();
   if (!step) {
@@ -383,7 +388,7 @@ function undo() {
 }
 
 function prune() {
-  if (!game || game.status === 'won') return;
+  if (!game || game.status === 'won' || paused) return;
   const step = game.prune();
   if (!step) {
     setLine('现在还没有能白送的灰点：要么没有满额的单元，要么邻域早就灰了。', 'info');
@@ -457,6 +462,38 @@ function syncFullscreenLabel() {
 }
 document.addEventListener('fullscreenchange', () => { syncFullscreenLabel(); draw(); });
 
+// ---------------------------------------------------------------- pause
+
+// 暂停要同时冻住三样：定步长仿真（Anim）、用时读数（clock）、以及盘面输入。
+// 只盖一层半透明皮、时钟照跑，是这条判据最容易的假绿。
+function syncPauseUI() {
+  const b = $('#btn-pause');
+  if (b) {
+    b.textContent = paused ? '继续' : '暂停';
+    b.setAttribute('aria-pressed', String(paused));
+    b.disabled = !game || game.status === 'won';
+  }
+  el.app.dataset.paused = paused ? '1' : '0';
+}
+
+function togglePause(force) {
+  if (!game || game.status === 'won') return false;
+  const next = force === undefined ? !paused : !!force;
+  if (next === paused) return false;
+  if (next) pausedMs = clock();      // 先结算跑到这一刻的用时，再翻标志：clock() 认 paused，反过来会把用时抹成 0
+  paused = next;
+  if (paused) {
+    flushResume();           // 暂停即落盘：这一局关掉标签也不会丢
+  } else {
+    startedAt = Date.now();  // 恢复后从这里重新起算，暂停的那几分钟不计入
+  }
+  Anim.setPaused(paused);
+  syncPauseUI();
+  setLine(paused ? '已暂停 · 按 P 或空格继续' : '继续推这一盘', paused ? 'paused' : '');
+  syncAll();                 // 面板上的用时此刻读的是冻结值
+  return true;
+}
+
 // ---------------------------------------------------------------- bindings
 
 $('#btn-new').addEventListener('click', () => begin(game ? game.puzzle.tier : TIERS[1].key));
@@ -470,6 +507,7 @@ $('#btn-menu-2').addEventListener('click', () => {
   show('menu');
 });
 $('#btn-again').addEventListener('click', () => begin(game.puzzle.tier));
+$('#btn-pause').addEventListener('click', () => togglePause());
 $('#btn-resume').addEventListener('click', () => {
   if (!resumeSaved()) {
     setLine('存档里的盘面重新生成失败，换一个。');
@@ -499,16 +537,40 @@ $('#btn-reset').addEventListener('click', () => {
   show('menu');
 });
 
+// 键盘面：Enter/空格 开局、P 或 空格 暂停、R 重开、M 静音、F 全屏、? 去玩法说明，
+// 再加这一盘自己的 h 提示 / z 撤销 / g 一键标灰 / 1·s 放星 / 2·x 标灰。
+// 'm' 原先在两种笔之间切换，现在让给静音（放星与标灰本来就有 1/s 与 2/x 直达），换笔改用 t。
 window.addEventListener('keydown', (ev) => {
-  if (ev.target && /input|textarea/i.test(ev.target.tagName)) return;
-  const k = ev.key.toLowerCase();
-  if (k === 'h') useHint();
+  const tag = ev.target && ev.target.tagName ? String(ev.target.tagName).toLowerCase() : '';
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+  const k = String(ev.key || '').toLowerCase();
+  // 焦点落在按钮上时，Enter/空格 是浏览器自己的"点击这个按钮"语义；这里再动一次就成一键两事。
+  if (tag === 'button' && (k === 'enter' || k === ' ' || ev.code === 'Space')) return;
+  if (k === ' ' || ev.code === 'Space') {
+    ev.preventDefault();
+    if (view.name === 'game' && game) togglePause();
+    else begin(game ? game.puzzle.tier : TIERS[1].key);
+  } else if (k === 'enter') {
+    if (view.name !== 'game') begin(TIERS[1].key);
+  } else if (k === 'p') {
+    togglePause();
+  } else if (k === 'r') {
+    begin(game ? game.puzzle.tier : TIERS[1].key);
+  } else if (k === 'h') useHint();
   else if (k === 'z') undo();
   else if (k === 'g') prune();
+  else if (k === 't' && game) setMode(game.mode === STAR ? OUT : STAR);
   else if (k === '1' || k === 's') setMode(STAR);
   else if (k === '2' || k === 'x') setMode(OUT);
-  else if (k === 'm' && game) setMode(game.mode === STAR ? OUT : STAR);
-  else if (k === 'f') toggleFullscreen();
+  else if (k === 'm') {
+    Store.setSetting('sound', Sound.enabled() ? false : true);
+    applySettings();
+  } else if (k === 'f') toggleFullscreen();
+  else if (k === '?') {
+    flushResume();          // 回选档前先把这一盘落盘，玩家能从"继续"接回来
+    renderMenu();
+    show('menu');
+  }
 });
 
 window.addEventListener('resize', () => {
@@ -546,6 +608,8 @@ window.starbattle = {
   undo,
   prune,
   setMode,
+  pause: (v) => togglePause(v),
+  paused: () => paused,
   daily: () => begin(TIERS[1].key, { daily: true }),
   // The harness commits through the same paths a pointer release does.
   tap(t, mode) {

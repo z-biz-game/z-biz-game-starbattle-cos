@@ -317,6 +317,9 @@ main { flex: 1; }
 #state-line[data-kind="bad"] { color: var(--error); }
 #state-line[data-kind="good"] { color: var(--accent); }
 #state-line[data-kind="info"] { color: var(--ink-dim); }
+#state-line[data-kind="paused"] { color: var(--ink-dim); font-weight: 600; }
+/* 暂停要有看得见的证据：盘面压暗，用时与定步长同时冻住（见 main.js 的 togglePause）。 */
+#app[data-paused="1"] #board { opacity: 0.35; filter: saturate(0.4); }
 
 #win-veil {
   position: absolute;

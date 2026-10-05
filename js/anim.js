@@ -21,6 +21,7 @@ let last = null; // 上一帧时间戳
 let raf = 0;
 let running = false;
 let reduced = false;
+let paused = false; // 暂停期间一步都不许走；累加器同时清零，恢复时不会补跑暂停那段
 
 let onFrame = () => {};
 
@@ -47,7 +48,8 @@ function update(ts) {
   if (last === null) { last = now; raf = requestAnimationFrame(update); return; }
   const dt = now - last;
   last = now;
-  if (!reduced) {
+  if (paused) { accum = 0; } // 暂停：仿真一步不推进，相位冻在原地
+  else if (!reduced) {
     accum += dt; // ← 这条就是"帧率无关"的命门：加真实 dt，不是加固定的 1/60。
     let guard = 0;
     while (accum >= SIM_STEP && guard < 8) { accum -= SIM_STEP; tick(); guard++; }
@@ -75,6 +77,12 @@ export const Anim = {
   setReduced(v) {
     reduced = !!v;
     if (reduced) { accum = 0; }
+  },
+  // 暂停：定步长一步不走；恢复时把 last 交回哨兵，别让"暂停那几分钟"变成一帧的 dt。
+  setPaused(v) {
+    paused = !!v;
+    accum = 0;
+    if (!paused) last = null;
   },
 
   // 提示/冲突脉冲：把某一格点亮，再按定步长淡出。
@@ -123,4 +131,5 @@ export const Anim = {
   get ambient() { return stepCount * SIM_STEP / 1000; },
   get pulseAlpha() { return pulse.active ? clamp01(1 - (pulse.t / PULSE_LIFE) ** 2) : 0; },
   get reducedMotion() { return reduced; },
+  get paused() { return paused; },
 };
