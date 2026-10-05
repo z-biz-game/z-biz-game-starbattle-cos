@@ -314,7 +314,28 @@ if (MODE === 'checks') {
   canvasEl.getBoundingClientRect = rectOld;
   out.push(`缩放命中 ${J(zoomHits)} => ${zoomHits.every((h) => h.endsWith('✓')) ? '按 CSS 缩放换算正确' : '点 A 打 B'}`);
 
-  // 5) 无 PointerEvent 的回落通路：touchstart/mousedown 必须能落子
+  // 5) 暂停真冻结：暂停期间定步长一步不走、用时不涨、盘面输入被吞；恢复后不补跑暂停那段
+  startRound('pause');
+  runFrames(30, 20);
+  const pSteps = A.steps;
+  const pMs = Math.round(sb.state().elapsedMs);
+  const pMoves = sb.state().moves;
+  sb.pause(true);
+  runFrames(60, 20); // 虚拟 1200ms
+  const frozen = { steps: A.steps - pSteps, ms: Math.round(sb.state().elapsedMs) - pMs };
+  const tapCell = 2 * sb.game.w + 2;
+  const cvEl = elCache.get('#board');
+  const pg = sb.geometry().geo;
+  const fireP = (type, ev) => { const l = cvEl.__l && cvEl.__l.get(type); for (const fn of l || []) fn(ev); };
+  fireP('pointerdown', { clientX: pg.x + 2 * pg.cell + pg.cell / 2, clientY: pg.y + 2 * pg.cell + pg.cell / 2, pointerId: 7, preventDefault() {} });
+  fireP('pointerup', { pointerId: 7, preventDefault() {} });
+  const blocked = sb.state().moves === pMoves && sb.game.st.cell[tapCell] === 0;
+  sb.pause(false);
+  runFrames(30, 20); // 恢复后虚拟 600ms ≈ 36 定步
+  const resumed = { steps: A.steps - pSteps, ms: Math.round(sb.state().elapsedMs) - pMs };
+  out.push(`暂停真冻结 暂停期60帧: 定步+${frozen.steps} 用时+${frozen.ms}ms 输入被吞=${blocked ? '是' : '否'}；恢复后600ms: 定步+${resumed.steps} 用时+${resumed.ms}ms => ${frozen.steps === 0 && frozen.ms === 0 && resumed.steps >= 30 && resumed.steps <= 40 && resumed.ms >= 600 && resumed.ms <= 700 ? '冻结且无补跑' : '未冻结或有补跑'}`);
+
+  // 6) 无 PointerEvent 的回落通路：touchstart/mousedown 必须能落子
   delete globalThis.PointerEvent;
   const prevG = sb.game;
   await import(`file://${REPO}/js/main.js?legacy=1`);
