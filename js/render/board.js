@@ -63,8 +63,11 @@ export class BoardView {
     const { cell, x, y, size } = this.geo;
     const game = this.game;
     if (!cell || !game) return -1;
-    const px = clientX - rect.left - x;
-    const py = clientY - rect.top - y;
+    // rect 是视觉像素、geo 是布局像素：页面缩放时两者不等，直接相减会让手指按 A 格命中的是 B 格。
+    const sx = rect.width > 0 ? this.geo.w / rect.width : 1;
+    const sy = rect.height > 0 ? this.geo.h / rect.height : 1;
+    const px = (clientX - rect.left) * sx - x;
+    const py = (clientY - rect.top) * sy - y;
     if (px < 0 || py < 0) return -1;
     const gx = Math.floor(px / cell);
     const gy = Math.floor(py / cell);

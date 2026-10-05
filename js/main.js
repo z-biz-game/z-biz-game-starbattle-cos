@@ -273,28 +273,60 @@ function draw() {
 // painting as the finger moves (a stroke that crosses several cells is still one undo), and a
 // gesture that starts on a mark of this mode's kind erases instead. There is no drag-to-swap here:
 // in a two-stars-per-row puzzle an accidental swap is the worst possible outcome.
-el.canvas.addEventListener('pointerdown', (ev) => {
-  if (!game || game.status === 'won' || paused) return;
-  const t = board.hitCell(ev.clientX, ev.clientY);
-  if (t < 0) return;
-  el.canvas.setPointerCapture(ev.pointerId);
+function beginStroke(clientX, clientY, pointerId) {
+  if (!game || game.status === 'won' || paused) return false;
+  const t = board.hitCell(clientX, clientY);
+  if (t < 0) return false;
+  if (typeof el.canvas.setPointerCapture === 'function' && pointerId != null) el.canvas.setPointerCapture(pointerId);
   const from = game.valueOf(t);
   drag = { cells: [t], seen: new Set([t]), mode: game.mode, erase: from === game.mode, moved: false };
   preview = { cells: [t] };
-  ev.preventDefault();
   draw();
-});
+  return true;
+}
 
-el.canvas.addEventListener('pointermove', (ev) => {
+function moveStroke(clientX, clientY) {
   if (!drag) return;
-  const t = board.hitCell(ev.clientX, ev.clientY);
+  const t = board.hitCell(clientX, clientY);
   if (t < 0 || drag.seen.has(t)) return;
   drag.seen.add(t);
   drag.cells.push(t);
   drag.moved = true;
   preview = { cells: drag.cells.slice() };
   draw();
+}
+
+el.canvas.addEventListener('pointerdown', (ev) => {
+  if (beginStroke(ev.clientX, ev.clientY, ev.pointerId)) ev.preventDefault();
 });
+
+el.canvas.addEventListener('pointermove', (ev) => moveStroke(ev.clientX, ev.clientY));
+
+function cancelStroke() {
+  drag = null;
+  preview = null;
+  draw();
+}
+
+// 没有 PointerEvent 的老 WebKit / WebView：touch 与 mouse 回落到同一条命中通路。
+// 只有 pointer 通路缺席时才挂，避免一次触摸被 pointer + touch + 合成 mouse 三重计数。
+if (typeof window.PointerEvent === 'undefined') {
+  el.canvas.addEventListener('touchstart', (ev) => {
+    const p = ev.touches[0];
+    if (p && beginStroke(p.clientX, p.clientY, null)) ev.preventDefault();
+  }, { passive: false });
+  el.canvas.addEventListener('touchmove', (ev) => {
+    const p = ev.touches[0];
+    if (p) { moveStroke(p.clientX, p.clientY); ev.preventDefault(); }
+  }, { passive: false });
+  el.canvas.addEventListener('touchend', (ev) => { endDrag(); ev.preventDefault(); }, { passive: false });
+  el.canvas.addEventListener('touchcancel', cancelStroke);
+  el.canvas.addEventListener('mousedown', (ev) => {
+    if (beginStroke(ev.clientX, ev.clientY, null)) ev.preventDefault();
+  });
+  el.canvas.addEventListener('mousemove', (ev) => moveStroke(ev.clientX, ev.clientY));
+  el.canvas.addEventListener('mouseup', endDrag);
+}
 
 function endDrag() {
   if (!drag || !game) {
@@ -316,11 +348,7 @@ function endDrag() {
 }
 
 el.canvas.addEventListener('pointerup', endDrag);
-el.canvas.addEventListener('pointercancel', () => {
-  drag = null;
-  preview = null;
-  draw();
-});
+el.canvas.addEventListener('pointercancel', cancelStroke);
 el.canvas.addEventListener('lostpointercapture', endDrag);
 
 // ---------------------------------------------------------------- actions
