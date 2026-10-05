@@ -9,6 +9,7 @@
     "dev": "node server.cjs 5314",
     "electron": "electron .",
     "test": "node tools/engine-test.mjs",
+    "parity": "node tools/frame-parity.mjs && node tools/frame-parity.mjs checks && node tools/frame-parity.mjs selftest",
     "balance": "node tools/balance.mjs",
     "verify": "bash tools/verify.sh",
     "check": "for f in js/*.js js/*/*.js; do node --check \"$f\" || exit 1; done && node --check server.cjs && node --check electron/main.cjs && node --check electron/preload.cjs && for f in tools/*.mjs tools/scenarios.js; do if [ ! -f \"$f\" ]; then echo \"check: 未落地，跳过 $f\"; continue; fi; node --check \"$f\" || exit 1; done && echo OK"
