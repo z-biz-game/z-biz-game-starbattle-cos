@@ -28,6 +28,12 @@ jobs:
       - name: Engine tests
         run: node tools/engine-test.mjs
 
+      # 文档行号对账：README 与 DESIGN 印着的每一条 `文件:行号` 都读回来核一遍——文件在不在、行号越不越界、
+      # 被指的那几行是不是整段空白、贴着引用的那个名字是否真的作为完整标识符坐在那几行上。这一腿不跑引擎、
+      # 不开浏览器，它管的是「按图索骥找不到东西」这一类坏法：改了代码不重编行号，文档不会自己响。
+      - name: Doc citations reconcile (文档行号对账)
+        run: node tools/docs-test.mjs
+
       # The ladder is a promise, not a caption: `TIERS[].band` is a selection target, and this
       # step goes red if a tier stops landing in its own band or the medians stop ordering.
       # It also re-proves every sampled board's uniqueness with count.js inside the node budget

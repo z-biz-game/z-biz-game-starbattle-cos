@@ -143,6 +143,11 @@ if [ -n "${SHOTS:-}" ]; then
 fi
 
 kill $WD 2>/dev/null
+# 文档行号对账：README / DESIGN 里印着的每一条 `path:NN` 都读回来对账。这一腿不碰 Chrome、不重跑引擎，
+# 判的是"文档自己还指不指得回代码"。它与下面 deploy-set 那两条一样住在这一步——只在 CI 里跑的门，
+# 读者手敲 npm run verify 时永远看不到它的输出，红了也不知道。
+echo "=== doc citations ==="
+node tools/docs-test.mjs || FAILED=1
 # 部署集闸：ci.yml 跑这两步、本地整闸以前一次都不跑。缺这一步就是「本地全绿、线上 404 自己的
 # manifest / sw.js / 图标」这一整类坏法。它不碰 Chrome，也不读页面，纯查产物。
 echo "=== deploy-set ==="

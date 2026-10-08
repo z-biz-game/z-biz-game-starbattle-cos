@@ -2,8 +2,12 @@
 
 工程侧的分解与动机。与 `README.md` 的分工：README 写承诺，本文写**为什么这些承诺是可以用命令检查的**。
 
-本轮所有数字都是我自己重跑的（HEAD `a656367`、Node `v26.8.1`、macOS、2026-09-28 03:00–03:20 CST，
-机器 load1 36.3）。**代码 > 本文**：本文与 `js/`、`tools/` 冲突时以代码为准。
+本文的数字来自**两次实跑**，都在同一台 macOS、Node `v26.8.1` 上：2026-09-28 03:00–03:20 CST
+（HEAD `a656367`、机器 load1 36.3）与 2026-10-08（HEAD `460e5dd`、load 3.6），两次都是
+`SAMPLES=24 node tools/balance.mjs`。结构性的那一批——摆法表 4–7 全 0 / 8 为 2 / 9 为 664 / 10 为 146510、
+各档抽题与候选审计的条数、穷举节点最多 1694 = 预算的 0.423%、五档中位数严格递增——两跑**逐位对上**；
+只有毫秒那一串随机器负载变（每一档都下移了，形状没变），所以它只作为读数写在 README 的「不承诺」里，
+本文不引用它的绝对值。**代码 > 本文**：本文与 `js/`、`tools/` 冲突时以代码为准。
 
 代码注释里点名要这一份文件的四处是 `js/engine/board.js:6`（→ §2）、`js/engine/board.js:19`（→ §3）、
 `js/engine/rules.js:32`（→ §8）、`js/engine/regions.js:220`（→ §8）。写不出来之前，这个仓对外只有
@@ -29,9 +33,9 @@ tools/engine-test.mjs tools/balance.mjs tools/scenarios.js tools/playtest.cjs to
 去够台架），后果是浏览器里 404 或把 bench 代码当运行时发出去；分层之所以在本仓成立，
 是因为 `count.js` 与 `rules.js` 从一开始就被要求**互相不认识**（§3），台架的东西没有一件被运行时需要过。
 
-## 2. 三态与哨兵陷阱（`board.js:6` 要的那一节）
+## 2. 三态与哨兵陷阱（`js/engine/board.js:6` 要的那一节）
 
-`EMPTY = 0`、`STAR = 1`、`OUT = 2`（`:11-13`，另有 `LAST_STATE = OUT`）。
+`EMPTY = 0`、`STAR = 1`、`OUT = 2`（`js/engine/board.js:11-13`，另有 `LAST_STATE = OUT`）。
 
 坑在 `EMPTY = 0`：它既像"没有值"又是存档里一个**合法状态**（没放星也没标灰的格子）。
 一个用 `0` 当"未填"哨兵的实现，在 `JSON → localStorage → 内存` 这一圈回来时，
@@ -41,29 +45,29 @@ tools/engine-test.mjs tools/balance.mjs tools/scenarios.js tools/playtest.cjs to
 `reset really resets`（对象被替换，不是把续玩卡藏起来）写成了注释，
 `resume` 里那圈 `region`/`marks` 的复核就是为了让"继续"不可能重开成另一张盘。
 
-同一类陷阱的第二处：`count.js:28` 对输入是**抛 `TypeError`** 而不是返回 `NONE`——
+同一类陷阱的第二处：`js/engine/count.js:28` 对输入是**抛 `TypeError`** 而不是返回 `NONE`——
 `region` 长度不是 `size²` 的输入是调用方的 bug，把它读成"这盘没有解"会伪装成一次通过。
 
-## 3. 两套互不信任的实现（`board.js:19` 要的那一节）
+## 3. 两套互不信任的实现（`js/engine/board.js:19` 要的那一节）
 
 出货判据要求同一张盘被两条**不共享任何推理**的路径各看一遍：
 
 - `js/engine/rules.js` 的 `solve()`：六条规则传播，产生分数、步数、以及"推不推得完"。
 - `js/engine/count.js` 的 `countSolutions()`：`cap=2` 穷举数解。这个文件**一条 `import` 都没有**
-  （本轮实测），八邻域在 `count.js` 里**自己重写了一份**——`board.js:19` 那句
+  （本轮实测），八邻域在 `count.js` 里**自己重写了一份**——`js/engine/board.js:19` 那句
   "written here for the solver's use. js/engine/count.js writes its own copy on purpose"
   说的就是这件事。**故意重复**的那份几何，正是独立性本身：如果两边共用一张邻接表，
   那么"邻接关系写错"这一个 bug 会让两条路同时错成同一个样子，逐格比对就永远绿。
 
 比对的落点在 `tools/balance.mjs`：它 import 了 `solve`（要拿铅笔路径重跑），
-但**不 import** `Rules` / `RULE_LIST`（`:17-22` 明写这个口径）——分数是铅笔通道自己吐出来的数，
+但**不 import** `Rules` / `RULE_LIST`（`tools/balance.mjs:17-22` 明写这个口径）——分数是铅笔通道自己吐出来的数，
 拿同一张权重表去验收量出这张表的尺子就是自证。两张盘的答案用 `sameStars` **逐格**比。
 
 第三层独立性是尺寸那一张表（§5）：暴力枚举与记忆化 DP **各算一遍**，两把尺共享零行代码。
 
 ## 4. 出题顺序为什么不能反过来
 
-`generate.js:3-16`：先切分区、再问"这个分区有没有恰好每区两颗、互不相邻的摆法"，
+`js/engine/generate.js:3-16`：先切分区、再问"这个分区有没有恰好每区两颗、互不相邻的摆法"，
 对随机切的诚实答案几乎永远是"没有"——随机 N 切会把"每区两颗"这个约束欠定或超定得离谱，
 能修的只有给分区做一套完整约束求解器，那是另一个项目。**先种一个合法星集**，
 "可解"就变成构造的性质而不是运气：每个区域天生带着两颗星，种下的那组**本身就是解**。
@@ -74,22 +78,22 @@ tools/engine-test.mjs tools/balance.mjs tools/scenarios.js tools/playtest.cjs to
 
 ## 5. 难度只有两条轴，而且第二条很贵
 
-兄弟仓摩天楼的难度轴是"抹掉几条边上的数字"（`z-biz-game-skyscraper-cos/js/engine/generate.js:22`
+兄弟仓摩天楼的难度轴是"抹掉几条边上的数字"（`../z-biz-game-skyscraper-cos/js/engine/generate.js:22`
 就是这么写的）。**本仓没有这个旋钮**：
-`分区图本身就是线索集`（`generate.js:14-16`），没有一堆可以抽走的数字。
+`分区图本身就是线索集`（`js/engine/generate.js:14-16`），没有一堆可以抽走的数字。
 于是只剩两条诚实的轴：
 
 1. **盘的大小**：8×8 与 9×9。合法星集总数本轮复算：`8×8 恰好 2 个`、`9×9 664 个`、`10×10 146510 个`
    （4–7 全是 0）。8×8 只有 2 个摆法意味着星的位置近乎被行/列/不相邻锁死，
    **8×8 的全部难度都住在切法里**。
-2. **边界咬合度**：`polish` / `transferMoves` 把区域边界一格一格搬（`regions.js:213 applyTransfer`），
+2. **边界咬合度**：`polish` / `transferMoves` 把区域边界一格一格搬（`applyTransfer`（`js/engine/regions.js:213`）），
    每搬一步都重跑铅笔路径；`TIERS[].tightenMoves` 就是这步的预算（24/24/30/48/60）。
 
 两条轴都要付账，账在抽题率上：出货 24 局，初学看 128 张候选（123 合式），
 高阶看 150 张里只有 **46** 张合式，大师 185 张里 **52** 张。候选审计那 8 张里"铅笔推得完"
 从初学的 7/8 掉到高阶的 **3/8**。
 
-`MIN_SIZE = 8`（`generate.js:205`）与"10×10 不可出货"（`:213-217`）都不是声明，是复算：
+`js/engine/generate.js:205` 的 `MIN_SIZE = 8`与"10×10 不可出货"（`js/engine/generate.js:213-217`）都不是声明，是复算：
 `balance.mjs` 每次跑先重打这张摆法表再重跑 10×10 的抽样。本轮结果
 `10×10：随机切 20 → 连通分区 16 → 铅笔推得完 0；局部搜索 0/6；未定格中位 92/100`，
 同跑 9×9 对照 `2/19 可推完、中位 26/81`。想上 10×10 就得放松"唯一"或"推到底"其中之一，
@@ -97,12 +101,12 @@ tools/engine-test.mjs tools/balance.mjs tools/scenarios.js tools/playtest.cjs to
 
 ## 6. 穷举器：预算、`OVERBUDGET`、以及它绝不被当成通过
 
-`countSolutions(puzzle, { cap = 2, budget = 400000 })`（`count.js:21`）：`cap=2` 是"数到两个就停"，
-`budget` 是**节点**上限（`:63` 每展开一个节点减一块）。撞顶就返回
-`{ status: OVERBUDGET, …, first: null }`（`:116`）——语义是"**没数完**"，不是"没找到第二个"。
+`js/engine/count.js:21` 的 `countSolutions(puzzle, { cap = 2, budget = 400000 })`：`cap=2` 是"数到两个就停"，
+`budget` 是**节点**上限（`js/engine/count.js:63` 每展开一个节点减一块）。撞顶就返回
+`{ status: OVERBUDGET, …, first: null }`（`js/engine/count.js:116`）——语义是"**没数完**"，不是"没找到第二个"。
 
 这条区分是本家族最难守住的东西：`OVERBUDGET` 长得像一次没失败，任何一处把它读成 pass
-就把承诺写成了空头支票。所以 `balance.mjs:13-14` 把"每一张出货盘都必须在预算内**证完**"
+就把承诺写成了空头支票。所以 `tools/balance.mjs:13-14` 把"每一张出货盘都必须在预算内**证完**"
 做成一条独立红项（`超预算 0/24 张`），出货门禁与候选审计门禁分别判。
 
 本轮余量：最贵的一次证明是 9×9 高阶的 **1694 节点 = 预算的 0.423%**，各档样本中位在 86–521 节点。
@@ -111,28 +115,28 @@ tools/engine-test.mjs tools/balance.mjs tools/scenarios.js tools/playtest.cjs to
 
 ## 7. 铅笔通道：六条规则怎么算一遍
 
-`propagate`（`rules.js:215`）扫一轮把六条规则各跑一遍并记账；`closure`（`:305`，`maxRounds = 64`）
-把"新写入 → 又能推出下一步"这个链条走到不动点；④⑤ 用 `completions`（`:122`，
+`propagate`（`js/engine/rules.js:215`）扫一轮把六条规则各跑一遍并记账；`closure`（`js/engine/rules.js:305`，`maxRounds = 64`）
+把"新写入 → 又能推出下一步"这个链条走到不动点；④⑤ 用 `completions`（`js/engine/rules.js:122`，
 `limit = 400` 封顶，这样"一个很开的单元"和"一个快关上的单元"花的时间同量级，封顶的答案会被如实标注）；
-⑥ 用 `diesAfterPlacement`（`:328`，`rounds = 2`）——放上去之后重走两轮 closure 看它死不死，
+⑥ 用 `diesAfterPlacement`（`js/engine/rules.js:328`，`rounds = 2`）——放上去之后重走两轮 closure 看它死不死，
 这是唯一需要"微型反证"的规则，所以权重 6 是这条链里最贵的一段，不是随便给的最大数。
 
 分数 `= Σ(命中次数 × 权重)`，由 `solve()` 在**出货路径上**打出来（不是 balance 事后重算，见 §3）。
 出货判据是三条同时成立：铅笔从空盘推得完 ∧ 穷举在预算内证到唯一 ∧ 解的结构过下限。
 
-## 8. 选择键必须是确定性量（`rules.js:32` 与 `regions.js:220` 要的那一节）
+## 8. 选择键必须是确定性量（`js/engine/rules.js:32` 与 `js/engine/regions.js:220` 要的那一节）
 
-`regions.js:220` 那段说的是：`interlockScore`（区域互锁程度）是**报出来给人看的形状度量**，
+`js/engine/regions.js:220` 那段说的是：`interlockScore`（区域互锁程度）是**报出来给人看的形状度量**，
 爬山过程把它和铅笔判定一起带着走，但它**不参与选盘**。理由不是审美——
 
 同一台机器上的实测教训是：**墙钟、以及与墙钟同源的任何量，都不许进选择键**。
 兄弟仓抓过一型事故：`sort` 的比较器里抽随机数，node 与 Chrome 画出两张不同的盘。
-本仓 `generate.js:32-34` 记着另一型：剪枝那一步当初写的是"没击穿 `budgetMs` 才让删"，
+本仓 `js/engine/generate.js:32-34` 记着另一型：剪枝那一步当初写的是"没击穿 `budgetMs` 才让删"，
 于是同一个 seed `again|3` 两跑出过两张 5×6 盘（179 分 / 171 分）——差别只来自某一次试删
 赶上一次抖动。**取舍只看确定性量**（节点数、解的个数与结构、铅笔步数），
 墙钟一律只作读数与门禁，这条在 `README.md` 的「不承诺」里有对应的数字（load1 36.3 时的 p50/p95）。
 
-权重同理：`rules.js:27-32` 那句 "set by measuring the spread they produce, not asserted" 的意思是，
+权重同理：`js/engine/rules.js:27-32` 那句 "set by measuring the spread they produce, not asserted" 的意思是，
 `1,1,2,3,4,6` 是拿去跑分位、看它能不能把五档拉开之后定下来的；定下来之后由
 `tools/engine-test.mjs:654`（钉死序列）和 `:665`（钉死一颗盘的分数 303）守着——
 改权重的人必须同时面对"重新量 band"这件事，不能只改一个数。
@@ -155,9 +159,9 @@ tools/engine-test.mjs tools/balance.mjs tools/scenarios.js tools/playtest.cjs to
 
 ## 10. 提示不是答案按钮（这条要能被 12 次拒绝证明）
 
-`nextForced()`（`rules.js:427`）只在六条规则真能推出下一步时返回一步；推不出来就没有提示可给。
+`nextForced()`（`js/engine/rules.js:427`）只在六条规则真能推出下一步时返回一步；推不出来就没有提示可给。
 UI 侧两条配套的账：`js/ui/game.js:221` 玩家下了与线索矛盾的一笔时"提示没有扣次数"，
-`:234` 那一枝注释写的是"这条分支保证 提示 不会变成答案按钮"；`:156` 撤销**不退还**提示次数，
+`js/ui/game.js:234` 那一枝注释写的是"这条分支保证 提示 不会变成答案按钮"；`js/ui/game.js:156` 撤销**不退还**提示次数，
 否则玩家可以靠撤销刷出一个 0 提示的记录。
 
 `hint` 场景把这些钉成 295 条断言，本轮 `charged 62 / refused 12 / script 64 / head 40 / inside 21 / weight 108`。
