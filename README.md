@@ -95,8 +95,8 @@
 | `SAMPLES=24 node tools/balance.mjs` | **`✓ balance 全绿`，exit 0**（上面两张表就是它的输出） |
 | `bash tools/verify.sh`（本机根路径形态） | `boot 43 + gen 201 + play 128 + hint 295 + win 131 = **798 checks, 0 failed**`，收尾接着跑文档行号对账（`rows: 32 fail: 0`）与部署集闸（`rows: 51 fail: 0`，它的阴性对照另打 13 把刀，其中 `X13` 在本仓没有靶子、如实报 SKIP）→ `=== ALL GREEN ===` |
 | `node tools/docs-test.mjs`（文档行号对账） | `rows: 32 fail: 0` · 解析 46 条 · 10 条带指认 · 跨仓引用 1 处 |
-| GitHub Actions `check` + `browser` | 浏览器闸**两种 URL 形态各跑一遍**（根路径 + Pages 的 `/z-biz-game-starbattle-cos/` 前缀），各 798 条 |
-| 线上站点 | `https://z-biz-game.github.io/z-biz-game-starbattle-cos/` 已部署，线上形态闸 798/0 |
+| GitHub Actions `check` + `browser` | 浏览器闸**两种 URL 形态各跑一遍**（根路径 + Pages 的 `/z-biz-game-starbattle-cos/` 前缀），各 798 条。这一轮读到的 run 37712146002（`e10d78c`，绿、8 步、墙钟 31 s）里两个形态都由 127.0.0.1 上的本地服务器供：5314 直供仓根，5513 按 `tools/assemble-site.sh` 的产物拷一份再以 `/<repo>/` 前缀供——所以这格证的是"前缀形态下页面请得到自己的每一件东西"，不是线上站点本身 |
+| 线上站点 | `https://z-biz-game.github.io/z-biz-game-starbattle-cos/` 已部署（Pages 那条 workflow 本轮 run 37712145991 绿、8 步）。**线上形态这一轮真跑了一遍**：`BASE_URL=` 指向该站点跑整道 `bash tools/verify.sh`，五个场景 43/201/128/295/131 逐档 0 失败、合计 798 条 0 失败，收尾两道本地闸 `rows: 32 fail: 0` 与 `rows: 51 fail: 0`，末行 `=== ALL GREEN ===`、rc=0。读数住在 2026-10-08 那一轮的日志 `_tmp-starbattle-verify-live-r1.log`（工作区根，不进仓），跑的是 `e10d78c` 的线上产物；这条腿不在 CI 里，CI 只跑上面那两个本地形态 |
 
 `hint` 场景那 295 条里有两个数值得单独看：`charged 62` 与 `refused 12`——
 提示有 12 次**拒绝开口**，因为那一步推不出来。这正是"提示不是答案按钮"的可检查形态。
