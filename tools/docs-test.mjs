@@ -201,19 +201,24 @@ const walkFiles = (d) => fs.readdirSync(path.join(ROOT, d), { withFileTypes: tru
   const rel = d + '/' + e.name;
   return e.isDirectory() ? walkFiles(rel) : (/\.(js|mjs|cjs)$/.test(e.name) ? [rel] : []);
 });
-const TARGET_FILES = TARGET_DIRS.filter((d) => fs.existsSync(path.join(ROOT, d))).flatMap(walkFiles).sort();
-const POOL_BY_ROOT = TARGET_DIRS.map((d) => `${d}:${TARGET_FILES.filter((f) => f.startsWith(d + '/')).length}`);
+const CODE_RE = /\.(js|mjs|cjs)$/;
+// 仓根那几份代码（`server.cjs`、`sw.js`）也在池里：只扫目录名的那版池子把它们当成不存在，
+// 而 D3b 那句"覆盖面等于盘上全部代码文件"当时是**按目录**比的，仓根整个不在尺子下——
+// 这条腿移植到兄弟仓（chrono-maze）时第一跑就在那儿红了，回来补上同一刀。
+const ROOT_CODE = fs.readdirSync(ROOT, { withFileTypes: true })
+  .filter((e) => e.isFile() && CODE_RE.test(e.name)).map((e) => e.name);
+const TARGET_FILES = TARGET_DIRS.filter((d) => fs.existsSync(path.join(ROOT, d))).flatMap(walkFiles)
+  .concat(ROOT_CODE).sort();
+const POOL_BY_ROOT = TARGET_DIRS.map((d) => `${d}:${TARGET_FILES.filter((f) => f.startsWith(d + '/')).length}`)
+  .concat([`仓根:${ROOT_CODE.length}`]);
 // 池子的覆盖面**不能由 TARGET_DIRS 自己说了算**：那是一张会自我实现的名单——把它改成只剩 `js`，
 // 上面那行 POOL_BY_ROOT 就只剩一个元素，"每棵树都进得来"的那句 every() 照样绿（本仓的破坏台架
-// K19 第一次下刀就是 0 格红，刀静默而闸全绿）。现在尺子换成盘上的顶层目录：
-// 凡是自己树里含 .js/.mjs/.cjs 的顶层目录，都必须有分支进池，名单漏一棵就红。
-const SKIP_TOP = new Set(['node_modules', '_scratch', '.git', 'dist']);
-const CODE_RE = /\.(js|mjs|cjs)$/;
-const CODE_TOP_DIRS = fs.readdirSync(ROOT, { withFileTypes: true })
-  .filter((e) => e.isDirectory() && !SKIP_TOP.has(e.name))
-  .map((e) => e.name)
-  .filter((d) => { try { return fs.readdirSync(path.join(ROOT, d), { recursive: true }).some((p) => CODE_RE.test(p)); } catch { return false; } });
-const UNCOVERED = CODE_TOP_DIRS.filter((d) => !TARGET_FILES.some((f) => f.startsWith(d + '/')));
+// K19 第一次下刀就是 0 格红，刀静默而闸全绿）。现在尺子是盘上的**第二遍独立遍历**：
+// 逐文件比，所以"漏一棵树"、"漏仓根一个文件"、"walker 写坏数少了"三样都红，而不只是漏目录。
+const SKIP = new Set(['node_modules', '_scratch', '.git', 'dist', 'shots']);
+const ALL_CODE = fs.readdirSync(ROOT, { recursive: true }).map(String)
+  .filter((p) => !p.split('/').some((seg) => SKIP.has(seg)) && CODE_RE.test(p)).sort();
+const UNCOVERED = ALL_CODE.filter((p) => !TARGET_FILES.includes(p));
 const ALL_DECLS = TARGET_FILES.flatMap(decls);
 const SYM = ALL_DECLS.find((d) => /\(/.test(d.text) && d.text.indexOf(d.name) === d.text.lastIndexOf(d.name)) || null;
 const PREFIX = ALL_DECLS.map((d) => ({ d, p: d.name.slice(0, -1) }))
@@ -297,12 +302,14 @@ ok(perFile.every((x) => Number(x.split(' ')[1]) >= 1), 'D2b 每份文档都真�
 ok(anchorBad.length === 0, 'D3 锚点：贴着引用的那个名字真的作为完整标识符出现在被指的那几行里（漂到隔壁一行要红）',
   anchorBad.length ? `锚点漂 ${anchorBad.length} 处：${anchorBad.slice(0, 6).join(' | ')}` : `${anchored} 条带指认的全部落回原处`);
 ok(anchored >= 6, 'D3a 锚点非空转：文档里确实有足够多的引用带指认（少于 6 条就是锚点那半在空转）', `${anchored} 条带指认`);
-ok(UNCOVERED.length === 0 && TARGET_FILES.length >= 12,
-  'D3b 夹具的取样池覆盖盘上每一棵含代码的树：覆盖面拿目录现量当尺子，而不是拿 TARGET_DIRS 自己（' +
+ok(UNCOVERED.length === 0 && TARGET_FILES.length === ALL_CODE.length && ALL_CODE.length >= 4,
+  'D3b 夹具的取样池等于盘上全部代码文件：覆盖面由**第二遍独立遍历**当尺子，而不是拿 TARGET_DIRS 自己（' +
   '名单会自我实现——把它改成只剩一棵树，"每棵树都进得来"那句 every() 就跟着变短而照样绿；' +
-  '本仓的台架 K19 就是这样第一次下刀 0 格红的），池子够大才轮得到后面那九把假引用',
-  `含代码的顶层目录 ${CODE_TOP_DIRS.join(', ') || '（一个都没量到）'}` +
-  (UNCOVERED.length ? ` · 没进池：${UNCOVERED.join(', ')}` : '') + ` · 池 ${TARGET_FILES.length} 个文件（${POOL_BY_ROOT.join(' · ')}）`);
+  '本仓的台架 K19 就是这样第一次下刀 0 格红的）。逐文件比，所以漏目录、漏仓根一个文件、' +
+  'walker 写坏数少了三样都红，池子够大才轮得到后面那九把假引用',
+  `第二遍遍历量到 ${ALL_CODE.length} 个代码文件 · 没进池的 ${UNCOVERED.length} 个` +
+  (UNCOVERED.length ? `：${UNCOVERED.slice(0, 8).join(', ')}` : '') +
+  ` · 池 ${TARGET_FILES.length} 个文件（${POOL_BY_ROOT.join(' · ')}）`);
 
 const eqn = (label, re, mine) => {
   const claims = [...docText.matchAll(re)].map((x) => Number(x[1]));
