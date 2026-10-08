@@ -78,7 +78,7 @@ tools/engine-test.mjs tools/balance.mjs tools/scenarios.js tools/playtest.cjs to
 
 ## 5. 难度只有两条轴，而且第二条很贵
 
-兄弟仓摩天楼的难度轴是"抹掉几条边上的数字"（`../z-biz-game-skyscraper-cos/js/engine/generate.js:22`
+兄弟仓摩天楼的难度轴是"抹掉几条边上的数字"（`../z-biz-game-skyscraper-cos/js/engine/generate.js:25-26`
 就是这么写的）。**本仓没有这个旋钮**：
 `分区图本身就是线索集`（`js/engine/generate.js:14-16`），没有一堆可以抽走的数字。
 于是只剩两条诚实的轴：
