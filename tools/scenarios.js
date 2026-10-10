@@ -304,10 +304,10 @@
     eq('代价序列按代价排的', E().RULE_LIST.map((r) => r.weight).join(','), '1,1,2,3,4,6');
     eq('六条规则的键', E().RULE_LIST.map((r) => r.key).join(','), 'adj,full,only,dead,pair,look');
 
-    // ---- DOM hooks: main.js queries 42 ids by name, so a rename that leaves one dangling has to
+    // ---- DOM hooks: main.js queries 43 ids by name, so a rename that leaves one dangling has to
     // go red here rather than as a null-property error three screens later.
-    const want = ['app', 'board', 'board-wrap', 'btn-again', 'btn-daily', 'btn-hint', 'btn-menu', 'btn-menu-2', 'btn-mode-mark', 'btn-mode-star', 'btn-motion', 'btn-new', 'btn-prune', 'btn-reset', 'btn-resume', 'btn-sound', 'btn-undo', 'hint-count', 'hint-line', 'hint-rule', 'record-list', 'resume-card', 'resume-meta', 'resume-name', 'state-line', 'stat-conflicts', 'stat-hints', 'stat-marked', 'stat-moves', 'stat-name', 'stat-remaining', 'stat-score', 'stat-stars', 'stat-tier', 'stat-time', 'stat-units', 'tier-list', 'view-game', 'view-menu', 'win-meta', 'win-record', 'win-veil'];
-    eq('手写名册有 42 个 id', want.length, 42);
+    const want = ['app', 'board', 'board-wrap', 'btn-again', 'btn-daily', 'btn-fullscreen', 'btn-hint', 'btn-menu', 'btn-menu-2', 'btn-mode-mark', 'btn-mode-star', 'btn-motion', 'btn-new', 'btn-prune', 'btn-reset', 'btn-resume', 'btn-sound', 'btn-undo', 'hint-count', 'hint-line', 'hint-rule', 'record-list', 'resume-card', 'resume-meta', 'resume-name', 'state-line', 'stat-conflicts', 'stat-hints', 'stat-marked', 'stat-moves', 'stat-name', 'stat-remaining', 'stat-score', 'stat-stars', 'stat-tier', 'stat-time', 'stat-units', 'tier-list', 'view-game', 'view-menu', 'win-meta', 'win-record', 'win-veil'];
+    eq('手写名册有 43 个 id', want.length, 43);
     eq('页面上的 id 名册与手写的一致', idRoster().join(','), want.slice().sort().join(','));
     const dup = idRoster().filter((x, i, a) => i && a[i - 1] === x);
     eq('没有重复 id', dup.join(','), '');
