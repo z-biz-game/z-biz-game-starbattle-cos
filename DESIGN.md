@@ -153,7 +153,7 @@ tools/engine-test.mjs tools/balance.mjs tools/scenarios.js tools/playtest.cjs to
 这一条不归 §8 管（§8 管的是出题器内部），但它正是官方帧率尺 `cos_frame_probe.js` 在本仓报红的原因，
 本轮把它量清楚了。
 
-**尺的读数**：❌「帧率依赖确证（typed-array 玩法真值同步逐格分叉）」——
+**尺的读数**（2026-10-25 补「同档换墙钟」对照之前）：❌「帧率依赖确证（typed-array 玩法真值同步逐格分叉）」——
 `game.board.region` 与 `game.puzzle.region` 三档差 67 格（首差格 #0），`puzzle.solution`/`puzzle.stars` 差 34 格，
 `game.st.cell`（玩家墨迹）差 0 格；"轨迹分叉@状态0"（第一帧就分叉）、"6s 差 67 格 = 1.00×"（不随时长加深）。
 
