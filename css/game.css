@@ -479,3 +479,11 @@ body {
     align-items: center;
   }
 }
+
+/* org 003 §4 reduced-motion 全域兜底：系统偏好"减少动效"时停掉所有动画 / 过渡 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
