@@ -148,7 +148,7 @@ tools/engine-test.mjs tools/balance.mjs tools/scenarios.js tools/playtest.cjs to
 `makePuzzle`（`js/engine/generate.js:231`）是 `seed → 盘面` 的纯函数，存档存的是**起始种子**
 （`js/store.js:129`），所以"同一个种子恒得同一张盘"成立，出题快慢、机器负载都不改结果。
 
-但随机档的**地址串**里确实有墙钟：`origin`（`js/main.js:125`）是
+但随机档的**地址串**里确实有墙钟：`origin`（`js/main.js:126`）是
 `${tier.key}-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6)}`——一个墙钟毫秒加一个随机数。
 这一条不归 §8 管（§8 管的是出题器内部），但它正是官方帧率尺 `cos_frame_probe.js` 在本仓报红的原因，
 本轮把它量清楚了。

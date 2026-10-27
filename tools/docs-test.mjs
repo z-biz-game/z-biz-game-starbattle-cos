@@ -263,9 +263,12 @@ function ok(a, b, detail = '') {
   return cond;
 }
 
-const docFiles = fs.readdirSync(ROOT).filter((f) => f.endsWith('.md'));
+// deliverable.md 是生成物（lead 的 gen_deliverable.py 产出，`--check` 逐字节对账）：它的引用是
+// README 的副本，放进这里等于同一句话被两套尺子各判一次，而卡片自己漂没漂由生成器管。
+// 这里只审手写文档。
+const docFiles = fs.readdirSync(ROOT).filter((f) => f.endsWith('.md') && f !== 'deliverable.md');
 ok(docFiles.length === 2 && ['README.md', 'DESIGN.md'].every((f) => docFiles.includes(f)),
-  'D1 输入集：本仓根下的 .md 都被这条腿读进来了（读的是整个目录，不是一份手抄名单）',
+  'D1 输入集：本仓根下的手写 .md 都被这条腿读进来了（读的是整个目录，不是一份手抄名单；生成的 deliverable.md 归生成器管）',
   docFiles.join(','));
 
 let docText = '';
